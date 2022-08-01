@@ -10,6 +10,7 @@ models/__pycache__
 /venv/
 
 *.pkl
+<<<<<<< Updated upstream
 model_weights/PAD/UNet/Scenario 3/epoch=20-step=35447.ckpt
 model_weights/PAD/UNet/Scenario 2/epoch=19-step=34039.ckpt
 model_weights/PAD/UNet/Scenario 1/epoch=16-step=28695.ckpt
@@ -37,3 +38,32 @@ coco_files/exp2_patches5000_strat_coco_test.json
 coco_files/exp1_patches5000_strat_coco_val.json
 coco_files/exp1_patches5000_strat_coco_train.json
 coco_files/exp1_patches5000_strat_coco_test.json
+=======
+coco_files/exp1_patches5000_strat_coco_test.json
+coco_files/exp1_patches5000_strat_coco_train.json
+coco_files/exp1_patches5000_strat_coco_val.json
+coco_files/exp2_patches5000_strat_coco_test.json
+coco_files/exp2_patches5000_strat_coco_train.json
+coco_files/exp2_patches5000_strat_coco_val.json
+coco_files/exp3_patches5000_strat_coco_test.json
+coco_files/exp3_patches5000_strat_coco_train.json
+coco_files/exp3_patches5000_strat_coco_val.json
+dataset/oad/exp1_patches5000_strat_coco_test.csv.gz
+dataset/oad/exp1_patches5000_strat_coco_train.csv.gz
+dataset/oad/exp1_patches5000_strat_coco_val.csv.gz
+dataset/oad/exp2_patches5000_strat_coco_test.csv.gz
+dataset/oad/exp2_patches5000_strat_coco_train.csv.gz
+dataset/oad/exp2_patches5000_strat_coco_val.csv.gz
+dataset/oad/exp3_patches5000_strat_coco_test.csv.gz
+dataset/oad/exp3_patches5000_strat_coco_train.csv.gz
+dataset/oad/exp3_patches5000_strat_coco_val.csv.gz
+model_weights/PAD/ConvLSTM/Scenario 1/epoch=17-step=60749.ckpt
+model_weights/PAD/ConvLSTM/Scenario 2/epoch=20-step=71483.ckpt
+model_weights/PAD/ConvLSTM/Scenario 3/epoch=25-step=87749.ckpt
+model_weights/PAD/ConvSTAR/Scenario 1/epoch=15-step=27007.ckpt
+model_weights/PAD/ConvSTAR/Scenario 2/epoch=19-step=34039.ckpt
+model_weights/PAD/ConvSTAR/Scenario 3/epoch=15-step=27007.ckpt
+model_weights/PAD/UNet/Scenario 1/epoch=16-step=28695.ckpt
+model_weights/PAD/UNet/Scenario 2/epoch=19-step=34039.ckpt
+model_weights/PAD/UNet/Scenario 3/epoch=20-step=35447.ckpt
+>>>>>>> Stashed changes

@@ -140,7 +140,7 @@ def create_coco_netcdf(netcdf_path, path_train, path_test, path_val, train_r=60,
             } for crop_name, crop_id in CROP_ENCODING.items() if crop_id in common_labels
         ]
 
-        if experiment in [2, 3]:
+        if experiment in [2, 3, 4]:
             coco_test = init_coco()
             test_image_id = 1
 
@@ -174,8 +174,8 @@ def create_coco_netcdf(netcdf_path, path_train, path_test, path_val, train_r=60,
         # Check against parsed tiles/years
         if (experiment is None) and not keep_tile(tile, year, keep_tiles, keep_years): continue
 
-        if (experiment not in [2, 3]) or \
-            ((experiment in [2, 3]) and ((tile in train_tiles) and (year in train_years))):
+        if (experiment not in [2, 3, 4]) or \
+            ((experiment in [2, 3, 4]) and ((tile in train_tiles) and (year in train_years))):
                 # file_name: should be current netcdf name and parent folder
                 file_name = Path(path.parts[-2]) / path.parts[-1]
                 coco['images'].append({
@@ -206,7 +206,7 @@ def create_coco_netcdf(netcdf_path, path_train, path_test, path_val, train_r=60,
 
     print('Splitting COCO into train/val/test sets')
 
-    if experiment in [2, 3]:
+    if experiment in [2, 3, 4]:
         # Split COCO into train/test
         if num_patches is None:
             new_train_r = train_r

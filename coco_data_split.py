@@ -156,6 +156,12 @@ if __name__ == '__main__':
         test_tiles, test_years = set(CAT_TILES), set(['2020'])
 
         common_lbls = common_labels(train_tiles | test_tiles)
+    elif args.experiment == 4:
+        # Train/val with Catalonia for 2019, test with Catalonia for 2020
+        train_tiles, train_years = set(CAT_TILES), set(['2019'])
+        test_tiles, test_years = set(CAT_TILES), set(['2020'])
+
+        common_lbls = common_labels(train_tiles | test_tiles)
     else:
         train_tiles, train_years = set(args.tiles), set(args.years)
         test_tiles, test_years = set(args.tiles), set(args.years)
