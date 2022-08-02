@@ -12,6 +12,8 @@ from utils.settings.config import CROP_ENCODING, LINEAR_ENCODER
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Computes the weights of each class.')
 
+    parser.add_argument('--data', type=str, default='dataset/netcdf', required=False,
+                        help='Path to the netCDF files. Default "dataset/netcdf/".')
     parser.add_argument('--coco_path', type=str, default='coco_files/', required=False,
                         help='Path of COCO files. Default "coco_files/".')
     parser.add_argument('--coco_prefix', type=str, default='exp1_patches2000_strat', required=False,
@@ -28,6 +30,8 @@ if __name__ == '__main__':
 
     # Define paths
     root_path_coco = Path(args.coco_path)
+    netcdf_path = Path(args.data)
+
     coco_train = root_path_coco / f'{args.coco_prefix}_coco_train.json'
     coco_val = root_path_coco / f'{args.coco_prefix}_coco_val.json'
 
@@ -46,7 +50,7 @@ if __name__ == '__main__':
     else:
         # Create Data Module
         dm = PADDataModule(
-            root_path_coco=root_path_coco,
+            netcdf_path=netcdf_path,
             path_train=coco_train,
             path_val=coco_val,
             group_freq='1MS',

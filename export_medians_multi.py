@@ -1,3 +1,4 @@
+import datetime
 import argparse
 from pathlib import Path
 from tqdm import tqdm
@@ -34,36 +35,50 @@ def process_patch(out_path, mode, num_buckets, root_coco_path, bands, padded_pat
 
     # Calculate medians
     netcdf = netCDF4.Dataset(root_coco_path / patch_info['file_name'], 'r')
+    print(f'    | {netcdf.patch_country_code} | {netcdf.patch_year} | {netcdf.patch_tile} | {netcdf.patch_name} | {patch_dir}')
+
     medians = get_medians(netcdf, 0, num_buckets, group_freq, bands, padded_patch_height,
                           padded_patch_width, output_size, pad_top, pad_bot,
                           pad_left, pad_right, medians_dtype)
+    print(f'      get_medians() ---------> medians shape: {medians.shape} | medians length: {len(medians)}')
 
     num_bins, num_bands = medians.shape[:2]
 
     medians = sliding_window_view(medians, [num_bins, num_bands, output_size[0], output_size[1]], [1, 1, output_size[0], output_size[1]]).squeeze()
     # shape: (subpatches_in_row, subpatches_in_col, bins, bands, height, width)
+    print(f'      sliding_window_view() --> medians shape: {medians.shape} | medians length: {len(medians)}')
 
     # Save medians
     bins_pad = len(str(medians.shape[-4]))
     subs_pad = len(str(medians.shape[0] * medians.shape[1]))
     sub_idx = 0
+
     for i in range(medians.shape[0]):
         for j in range(medians.shape[1]):
             for t in range(num_bins):
-                np.save(patch_dir / f'sub{str(sub_idx).rjust(subs_pad, "0")}_bin{str(t).rjust(bins_pad, "0")}', medians[i, j, t, :, :, :].astype(medians_dtype))
+                #test_medians = medians[i, j, t, :, :, :]
+                #print(f'    test_medians shape: {test_medians.shape}')
+                fname = patch_dir / f'sub{str(sub_idx).rjust(subs_pad, "0")}_bin{str(t).rjust(bins_pad, "0")}'
+                #np.save(fname, medians[i, j, t, :, :, :].astype(medians_dtype))
             sub_idx += 1
 
     # Save labels
     labels = get_labels(netcdf, output_size, pad_top, pad_bot, pad_left, pad_right)
+    print(f'      get_labels() --> labels shape: {labels.shape} | labels length: {len(labels)}')
+
     labels = sliding_window_view(labels, output_size, output_size)
+    print(f'      sliding_window_view() --> labels shape: {labels.shape} | labels length: {len(labels)}')
+
     labels = labels.squeeze()  # shape: (subpatches_in_row, subpatches_in_col, height, width)
+    print(f'      labels.squeeze() --> labels shape: {labels.shape} | labels length: {len(labels)}')
 
     lbl_idx = 0
     lbl_pad = len(str(labels.shape[0] * labels.shape[1]))
     for i in range(labels.shape[0]):
         for j in range(labels.shape[1]):
-            np.save(patch_dir / f'labels_sub{str(lbl_idx).rjust(lbl_pad, "0")}', labels[i, j, :, :].astype(label_dtype))
+            #np.save(patch_dir / f'labels_sub{str(lbl_idx).rjust(lbl_pad, "0")}', labels[i, j, :, :].astype(label_dtype))
             lbl_idx += 1
+
 
 def sliding_window_view(arr, window_shape, steps):
     '''
@@ -318,6 +333,12 @@ if __name__ == '__main__':
                        bands, padded_patch_height, padded_patch_width, medians_dtype,
                        label_dtype, args.group_freq, output_size, pad_top, pad_bot, pad_left, pad_right)
 
-        process_map(func, list(coco.imgs.items()), max_workers=args.num_workers)
+        print (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        #process_map(func, list(coco.imgs.items()), max_workers=args.num_workers, chunksize=8)
+
+        for item in list(coco.imgs.items()):
+            func(item)
+            print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     print('Medians saved.\n')

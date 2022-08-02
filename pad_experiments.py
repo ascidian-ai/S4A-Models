@@ -17,7 +17,8 @@ from model.PAD_unet import UNet
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
-from pytorch_lightning.plugins import DDPPlugin
+#from pytorch_lightning.plugins import DDPPlugin # LightningDeprecationWarning: Passing <pytorch_lightning.plugins.training_type.ddp.DDPPlugin
+from pytorch_lightning.strategies.ddp import DDPStrategy
 import torch
 
 from utils.PAD_datamodule import PADDataModule
@@ -126,6 +127,8 @@ def main():
     parser.add_argument('--binary_labels', action='store_true', default=False, required=False,
                              help='Map categories to 0 background, 1 parcel. Default False')
 
+    parser.add_argument('--data', type=str, default='dataset/netcdf', required=False,
+                        help='Path to the netCDF files. Default "dataset/netcdf/".')
     parser.add_argument('--root_path_coco', type=str, default='coco_files/', required=False,
                              help='root path until coco file. Default: "coco_files/"')
     parser.add_argument('--prefix_coco', type=str, default=None, required=False,
@@ -195,6 +198,7 @@ def main():
 
     # Normalize paths for different OSes
     root_path_coco = Path(args.root_path_coco)
+    netcdf_path = Path(args.data)
 
     # Check existence of data folder
     if not root_path_coco.is_dir():
@@ -229,6 +233,10 @@ def main():
         class_weights = {LINEAR_ENCODER[k]: v for k, v in CLASS_WEIGHTS.items()}
     else:
         class_weights = None
+
+    # Load 10m bands by default
+    if args.bands is None:
+        args.bands = ['B02', 'B03', 'B04', 'B08']
 
     if args.model == 'convlstm':
         args.img_size = [int(dim) for dim in args.img_size]
@@ -387,7 +395,7 @@ def main():
     if args.train:
         # Create Data Modules
         dm = PADDataModule(
-            root_path_coco=root_path_coco,
+            netcdf_path=netcdf_path,
             path_train=path_train,
             path_val=path_val,
             group_freq=args.group_freq,
@@ -428,11 +436,14 @@ def main():
 
         tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
 
-        my_ddp = DDPPlugin(find_unused_parameters=True)
+        #my_ddp = DDPPlugin(find_unused_parameters=True)
 
-        trainer = pl.Trainer(gpus=args.num_gpus,
+        trainer = pl.Trainer(#gpus=args.num_gpus,
+                             accelerator='cpu',
+                             enable_checkpointing=True,
                              num_nodes=args.num_nodes,
-                             progress_bar_refresh_rate=20,
+                             #progress_bar_refresh_rate=20,
+                             log_every_n_steps=1,
                              min_epochs=1,
                              max_epochs=max_epoch + 1,
                              check_val_every_n_epoch=1,
@@ -441,11 +452,11 @@ def main():
                              logger=tb_logger,
                              gradient_clip_val=10.0,
                              # early_stop_callback=early_stopping,
-                             checkpoint_callback=True,
+                             # checkpoint_callback=True,
                              resume_from_checkpoint=resume_from_checkpoint,
-                             fast_dev_run=args.devtest,
-                             strategy='ddp' if args.num_gpus > 1 else None,
-                             plugins=[my_ddp]
+                             fast_dev_run=args.devtest #,
+                             #strategy='ddp' if args.num_gpus > 1 else None ,
+                             #plugins=[my_ddp]
                              )
 
         # Train model
@@ -453,7 +464,7 @@ def main():
     else:
         # Create Data Module
         dm = PADDataModule(
-            root_path_coco=root_path_coco,
+            netcdf_path=netcdf_path,
             path_test=path_test,
             group_freq=args.group_freq,
             prefix=prefix,
@@ -479,16 +490,18 @@ def main():
         # Setup to multi-GPUs
         dm.setup('test')
 
-        my_ddp = DDPPlugin(find_unused_parameters=True)
+        #my_ddp = DDPPlugin(find_unused_parameters=True)
 
-        trainer = pl.Trainer(gpus=args.num_gpus,
+        trainer = pl.Trainer(#gpus=args.num_gpus,
+                             accelerator='cpu',
+                             enable_checkpointing=True,
                              num_nodes=args.num_nodes,
-                             progress_bar_refresh_rate=20,
+                             #progress_bar_refresh_rate=20,
                              min_epochs=1,
                              max_epochs=2,
-                             precision=32,
-                             strategy='ddp' if args.num_gpus > 1 else None,
-                             plugins=[my_ddp]
+                             precision=32#,
+                             #strategy='ddp' if args.num_gpus > 1 else None,
+                             #plugins=[my_ddp]
                              )
 
         # Test model

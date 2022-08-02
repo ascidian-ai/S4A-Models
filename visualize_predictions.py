@@ -55,6 +55,8 @@ if __name__ == '__main__':
     parser.add_argument('--binary_labels', action='store_true', default=False, required=False,
                              help='Map categories to 0 background, 1 parcel. Default False')
 
+    parser.add_argument('--data', type=str, default='dataset/netcdf', required=False,
+                        help='Path to the netCDF files. Default "dataset/netcdf/".')
     parser.add_argument('--root_path_coco', type=str, default='coco_files/', required=False,
                              help='root path until coco file. Default: "coco_files/"')
     parser.add_argument('--prefix_coco', type=str, default=None, required=False,
@@ -117,6 +119,7 @@ if __name__ == '__main__':
 
     # Normalize paths for different OSes
     root_path_coco = Path(args.root_path_coco)
+    netcdf_path = Path(args.data)
 
     # Check existence of data folder
     if not root_path_coco.is_dir():
@@ -175,7 +178,7 @@ if __name__ == '__main__':
 
     # Create Data Module for testing images
     dm = PADDataModule(
-        root_path_coco=root_path_coco,
+        netcdf_path=netcdf_path,
         path_test=path_test,
         group_freq=args.group_freq,
         prefix=args.prefix,
