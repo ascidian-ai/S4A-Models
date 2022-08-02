@@ -69,6 +69,9 @@ def create_dataframe(data_path, tiles, years, common_labels=None):
 
         if not keep_tile(tile, year, tiles, years): continue
 
+        #print(patch_path.name)
+        print('□', end='')
+
         patch_netcdf = netCDF4.Dataset(patch_path, 'r')
         labels = xr.open_dataset(xr.backends.NetCDF4DataStore(patch_netcdf['labels']))
 
@@ -222,7 +225,7 @@ if __name__ == '__main__':
         stratifier = IterativeStratification(n_splits=2, order=1, sample_distribution_per_fold=[1 - (new_val_r / 100), new_val_r / 100])
         val_idx, test_idx = next(stratifier.split(X_val_test.values[:, np.newaxis], y_val_test))
 
-        if args.experiment in [2, 3]:
+        if args.experiment in [2, 3, 4]:
             # We will split the test data so that one of the splits will have the
             # appropriate test size
             if args.num_patches is None:
