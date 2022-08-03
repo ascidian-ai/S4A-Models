@@ -11,9 +11,12 @@ The user can choose among three experiment settings:
                  and test set contains only France tiles for a single year
  - Experiment 3: Train/Val sets contain only France tiles for a single year,
                  and test set contains only Catalonia tiles for a different year.
+ - Experiment 4: Train/Val sets contain only Catalonia tiles for a single year,
+                 and test set contains only Catalonia tiles for a different year.
 '''
 
 import argparse
+import sys
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -45,7 +48,7 @@ def plot_label_frequencies(coco, data_path, title, ax, labels_common=None):
     label_freqs[0] = 0
     for img in coco.imgs.values():
         fname = Path(img['file_name']).name
-        patch_netcdf = netCDF4.Dataset(data_path / fname, 'r')
+        patch_netcdf = netCDF4.Dataset(data_path / fname, 'r') # removed coco_path (bug)
         labels = xr.open_dataset(xr.backends.NetCDF4DataStore(patch_netcdf['labels']))
         for label in list(np.unique(labels.labels.data)):
             label_freqs[label] += 1
@@ -53,7 +56,10 @@ def plot_label_frequencies(coco, data_path, title, ax, labels_common=None):
     ax.bar(list(range(1, len(label_freqs) + 1)), label_freqs.values())
     ax.set_xticks(list(range(1, len(label_freqs) + 1)))
     ax.set_xticklabels(list(label_freqs.keys()), rotation=90, fontsize=7)
-    ax.set_title(title)
+    tick_spacing = 10 # space out tick marks
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing)) # space out tick marks
+    ax.set_title(title, fontsize=11)
+
 
 
 def create_dataframe(data_path, tiles, years, common_labels=None):
@@ -64,13 +70,23 @@ def create_dataframe(data_path, tiles, years, common_labels=None):
     patch_paths = list(data_path.glob('*.nc'))
     random.shuffle(patch_paths)
 
+    print(f'Creating Dataframe for data_path:"{data_path}" , years:{years} and tiles:{tiles}')
+
+    num_patches = len(patch_paths)
+    patch_num = 0
+    pcnt_complete = -1
     for i, patch_path in enumerate(patch_paths):
+        # Progress bar
+        patch_num += 1
+        new_pct = int((patch_num / num_patches) * 100)
+        if new_pct > pcnt_complete:
+            pcnt_complete = new_pct
+            print(f'[{int(pcnt_complete):3}%]', end='')
+            print('□' * pcnt_complete, end="\r")
+
         year, tile = patch_path.stem.split('_')[:2]
 
         if not keep_tile(tile, year, tiles, years): continue
-
-        #print(patch_path.name)
-        print('□', end='')
 
         patch_netcdf = netCDF4.Dataset(patch_path, 'r')
         labels = xr.open_dataset(xr.backends.NetCDF4DataStore(patch_netcdf['labels']))
@@ -91,6 +107,7 @@ def create_dataframe(data_path, tiles, years, common_labels=None):
         else:
             # Data comes from all tiles so all labels are common
             data.loc[i] = [patch_path, list(unique_labels)]
+    print(f'\n')
     return data
 
 
@@ -120,15 +137,16 @@ if __name__ == '__main__':
     parser.add_argument('--num_patches', type=int, default=None, required=False,
                         help='The number of patches to use overall. Default all.')
 
-    parser.add_argument('--experiment', type=int, choices=[1, 2, 3], default=None, required=False,
+    parser.add_argument('--experiment', type=int, choices=[1, 2, 3, 4], default=None, required=False,
                         help='The type of experiment to create COCO files for. \
                             If it is given, any other specified tiles/years are ignored. \
                             Type 1: Train/val/test with all tiles and all years. \
                             Type 2: Train/val with Catalonia for all years, test with France. \
-                            Type 3: Train/val with France for 2019, test with Catalonia for 2020.')
+                            Type 3: Train/val with France for 2019, test with Catalonia for 2020. \
+                            Type 4: Train/val with Catalonia for 2019, test with Catalonia for 2020.')
 
     parser.add_argument('--seed', type=int, default=None, required=False,
-                        help='The seed to use for random patch selection. Defauly None (random).')
+                        help='The seed to use for random patch selection. Default None (random).')
 
     args = parser.parse_args()
 
@@ -181,6 +199,10 @@ if __name__ == '__main__':
 
     # Define ratios
     train_r, val_r, test_r = [int(i) for i in args.ratio]
+    total_ratio = train_r+val_r+test_r
+    if total_ratio != 100:
+        print(f'ERROR: Ratios should add up to 100 exactly. Ratio arguments [{args.ratio}] add up to {total_ratio}.')
+        exit(1)
 
     if args.how == 'stratified':
         if args.seed is not None:
@@ -303,6 +325,7 @@ if __name__ == '__main__':
     # Plot label distributions of the produced files.
     if args.plot_distros:
         import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker  # used to space out tick marks on x-axis of plot
 
         fig, axes = plt.subplots(2, 2)
 
@@ -319,6 +342,7 @@ if __name__ == '__main__':
                                    data_path,
                                    "Test set",
                                    axes[1, 1])
+
         else:
             plot_label_frequencies(COCO(coco_path / f'{prefix}_coco_train.json'),
                                    data_path,
@@ -336,4 +360,18 @@ if __name__ == '__main__':
                                    axes[1, 1],
                                    labels_common=common_lbls)
 
+        # set the spacing between subplots
+        plt.subplots_adjust(left=0.1,
+                            bottom=0.1,
+                            right=0.9,
+                            top=0.85,
+                            wspace=0.4,
+                            hspace=0.4)
+
+        # Set title for plot
+        fig.suptitle(f'Dataset Frequency Histograms for {prefix}', fontsize=14)
+
+        # save as high res png image instead of displaying
+        plt.savefig(coco_path / f'{prefix}_coco_plot_distribution.png', dpi=1200)
         plt.show()
+        plt.close() # closing plt object is good practice for memory mgt
