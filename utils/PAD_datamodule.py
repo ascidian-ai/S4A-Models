@@ -15,7 +15,7 @@ pl.seed_everything(RANDOM_SEED)
 
 
 class PADDataModule(pl.LightningDataModule):
-    # Documentation: https://pytorch-lightning.readthedocs.io/en/latest/extensions/datamodules.html
+    # Documentation: https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.core.LightningDataModule.html#pytorch_lightning.core.LightningDataModule
     '''
     PyTorch Lightning DataModule Wrapper for PADDataset
     '''
@@ -145,10 +145,10 @@ class PADDataModule(pl.LightningDataModule):
         self.num_bands = len(bands)
         self.img_size = IMG_SIZE
 
-        if output_size is None:
-            self.dims = (self.batch_size, self.window_len, self.num_bands, self.img_size, self.img_size)
-        else:
-            self.dims = (self.batch_size, self.window_len, self.num_bands, self.output_size[0], self.output_size[1])
+        #if output_size is None:
+        #    self.dims = (self.batch_size, self.window_len, self.num_bands, self.img_size, self.img_size)
+        #else:
+        #    self.dims = (self.batch_size, self.window_len, self.num_bands, self.output_size[0], self.output_size[1])
 
         self.dataset_train = None
         self.dataset_eval = None

@@ -12,8 +12,6 @@ from utils.settings.config import CROP_ENCODING, LINEAR_ENCODER
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Computes the weights of each class.')
 
-    parser.add_argument('--data', type=str, default='dataset/netcdf', required=False,
-                        help='Path to the netCDF files. Default "dataset/netcdf/".')
     parser.add_argument('--coco_path', type=str, default='coco_files/', required=False,
                         help='Path of COCO files. Default "coco_files/".')
     parser.add_argument('--coco_prefix', type=str, default='exp1_patches2000_strat', required=False,
@@ -32,7 +30,6 @@ if __name__ == '__main__':
 
     # Define paths
     root_path_coco = Path(args.coco_path)
-    netcdf_path = Path(args.data)
 
     coco_train = root_path_coco / f'{args.coco_prefix}_coco_train.json'
     coco_val = root_path_coco / f'{args.coco_prefix}_coco_val.json'
@@ -79,6 +76,8 @@ if __name__ == '__main__':
         # TRAINING
         dm.setup('fit')
 
+        print(f'length of train dataset: {len(dm.dataset_train)}')
+
         # Count pixels for each class
         class_pixel_counts = {c: 0 for c in LINEAR_ENCODER.values()}
 
@@ -108,6 +107,9 @@ if __name__ == '__main__':
     # Compute weights for each class
     all_counts = sum(list(class_pixel_counts.values()))
     n_classes = len(class_pixel_counts)
-    class_weights = {k: all_counts / (n_classes * v) for k, v in class_pixel_counts.items()}
 
-    pickle.dump(class_weights, open(out_name, 'wb'))
+    try:
+        class_weights = {k: all_counts / (n_classes * v) for k, v in class_pixel_counts.items()}
+        pickle.dump(class_weights, open(out_name, 'wb'))
+    except:
+        print(f'WARNING: Could not create {out_name} .')
