@@ -134,6 +134,9 @@ def main():
     parser.add_argument('--prefix_coco', type=str, default=None, required=False,
                              help='The prefix to use for the COCO file. Default none.')
 
+    parser.add_argument('--netcdf_path', type=str, default='dataset/netcdf',
+                        help='The path containing the netcdf files. Default "dataset/netcdf".')
+
     parser.add_argument('--prefix', type=str, default=None, required=False,
                              help='The prefix to use for dumping data files. If none, the current timestamp is used')
 
@@ -199,6 +202,8 @@ def main():
     # Normalize paths for different OSes
     root_path_coco = Path(args.root_path_coco)
     netcdf_path = Path(args.data)
+
+    netcdf_path = Path(args.netcdf_path)
 
     # Check existence of data folder
     if not root_path_coco.is_dir():
