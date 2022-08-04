@@ -1,3 +1,4 @@
+from datetime import datetime
 import argparse
 import numpy as np
 from pathlib import Path
@@ -18,6 +19,8 @@ if __name__ == '__main__':
                         help='Prefix of the COCO file. Default "exp1_patches2000_strat".')
     parser.add_argument('--medians_prefix', type=str, default='exp1_patches2000_strat_61x61', required=False,
                         help='Prefix of the medians directory. Default "exp1_patches2000_strat_61x61".')
+    parser.add_argument('--medians_path', type=str, default='logs/medians',
+                        help='The path containing the npy files. Default "logs/medians".')
     parser.add_argument('--netcdf_path', type=str, default='dataset/netcdf',
                         help='The path containing the netcdf files. Default "dataset/netcdf".')
     parser.add_argument('--out_prefix', type=str, required=False,
@@ -34,6 +37,7 @@ if __name__ == '__main__':
     coco_train = root_path_coco / f'{args.coco_prefix}_coco_train.json'
     coco_val = root_path_coco / f'{args.coco_prefix}_coco_val.json'
     netcdf_path = Path(args.netcdf_path)
+    medians_path = Path(args.medians_path)
 
     if args.out_prefix is not None:
         out_name = f'{args.out_prefix}_class_weights.pkl'
@@ -51,6 +55,7 @@ if __name__ == '__main__':
         # Create Data Module
         dm = PADDataModule(
             netcdf_path=netcdf_path,
+            medians_path=medians_path,
             path_train=coco_train,
             path_val=coco_val,
             group_freq='1MS',
@@ -84,7 +89,15 @@ if __name__ == '__main__':
         if args.ignore_zero:
             del class_pixel_counts[0]
 
+        print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        num_files, pcnt_complete = len(dm.dataset_train), -1
         for idx in range(len(dm.dataset_train)):
+            # Progress bar
+            new_pct = int((idx / num_files) * 100)
+            if new_pct > pcnt_complete:
+                pcnt_complete = new_pct
+                print(f'[{int(pcnt_complete):3}%|{idx:7}/{num_files:7}]','□' * pcnt_complete, end="\r")
+
             try:
                 batch = dm.dataset_train.__getitem__(idx)
             except:
@@ -102,14 +115,21 @@ if __name__ == '__main__':
 
                 class_pixel_counts[values[i]] += counts[i]
 
+        print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        print('Saving Pixel Counts...')
+
         pickle.dump(class_pixel_counts, open(pixel_cnts_name, 'wb'))
 
     # Compute weights for each class
     all_counts = sum(list(class_pixel_counts.values()))
     n_classes = len(class_pixel_counts)
 
+    print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     try:
+        print('Saving Class Weights...')
         class_weights = {k: all_counts / (n_classes * v) for k, v in class_pixel_counts.items()}
         pickle.dump(class_weights, open(out_name, 'wb'))
     except:
         print(f'WARNING: Could not create {out_name} .')
+
+    print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

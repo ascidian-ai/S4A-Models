@@ -127,8 +127,6 @@ def main():
     parser.add_argument('--binary_labels', action='store_true', default=False, required=False,
                              help='Map categories to 0 background, 1 parcel. Default False')
 
-    parser.add_argument('--data', type=str, default='dataset/netcdf', required=False,
-                        help='Path to the netCDF files. Default "dataset/netcdf/".')
     parser.add_argument('--root_path_coco', type=str, default='coco_files/', required=False,
                              help='root path until coco file. Default: "coco_files/"')
     parser.add_argument('--prefix_coco', type=str, default=None, required=False,
@@ -136,6 +134,9 @@ def main():
 
     parser.add_argument('--netcdf_path', type=str, default='dataset/netcdf',
                         help='The path containing the netcdf files. Default "dataset/netcdf".')
+
+    parser.add_argument('--medians_path', type=str, default='logs/medians',
+                        help='The path containing the npy files. Default "logs/medians".')
 
     parser.add_argument('--prefix', type=str, default=None, required=False,
                              help='The prefix to use for dumping data files. If none, the current timestamp is used')
@@ -201,14 +202,18 @@ def main():
 
     # Normalize paths for different OSes
     root_path_coco = Path(args.root_path_coco)
-    netcdf_path = Path(args.data)
-
+    medians_path = Path(args.medians_path)
     netcdf_path = Path(args.netcdf_path)
 
     # Check existence of data folder
     if not root_path_coco.is_dir():
         print(f'{font_colors.RED}Coco path doesn\'t exist!{font_colors.ENDC}')
         exit(1)
+
+    if not medians_path.is_dir():
+        print(f'{font_colors.RED}Medians path doesn\'t exist!{font_colors.ENDC}')
+        exit(1)
+
 
     # Create folders for saving and/or retrieving useful files for dataloaders
     log_path = Path('logs')
@@ -401,6 +406,7 @@ def main():
         # Create Data Modules
         dm = PADDataModule(
             netcdf_path=netcdf_path,
+            medians_path=medians_path,
             path_train=path_train,
             path_val=path_val,
             group_freq=args.group_freq,
@@ -470,6 +476,7 @@ def main():
         # Create Data Module
         dm = PADDataModule(
             netcdf_path=netcdf_path,
+            medians_path=medians_path,
             path_test=path_test,
             group_freq=args.group_freq,
             prefix=prefix,

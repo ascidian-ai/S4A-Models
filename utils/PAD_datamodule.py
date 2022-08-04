@@ -23,6 +23,7 @@ class PADDataModule(pl.LightningDataModule):
     def __init__(
             self,
             netcdf_path: Union[str, Path] = Path(),
+            medians_path: Union[str, Path] = Path(),
             path_train: Union[str, Path] = Path(),
             path_val: Union[str, Path] = Path(),
             path_test: Union[str, Path] = Path(),
@@ -52,6 +53,8 @@ class PADDataModule(pl.LightningDataModule):
         ----------
         netcdf_path: Path or str
             The path containing the training data (netCDF files).
+        medians_path: Path or str
+            The root path containing the medians training data (npy files).
         path_train: Path or str
             The COCO file path containing the training data.
         path_val: Path or str
@@ -115,6 +118,7 @@ class PADDataModule(pl.LightningDataModule):
         super().__init__()
 
         self.netcdf_path = netcdf_path
+        self.medians_path = medians_path
 
         self.path_train = Path(path_train)
         self.path_val = Path(path_val)
@@ -187,6 +191,7 @@ class PADDataModule(pl.LightningDataModule):
 
             self.dataset_train = PADDataset(
                 root_path_netcdf=self.netcdf_path,
+                medians_path=self.medians_path,
                 coco=coco_train,
                 # transforms=transforms,
                 group_freq=self.group_freq,
@@ -211,6 +216,7 @@ class PADDataModule(pl.LightningDataModule):
 
             self.dataset_eval = PADDataset(
                 root_path_netcdf=self.netcdf_path,
+                medians_path=self.medians_path,
                 coco=coco_val,
                 group_freq=self.group_freq,
                 compression=self.compression,
@@ -238,6 +244,7 @@ class PADDataModule(pl.LightningDataModule):
 
             self.dataset_test = PADDataset(
                 root_path_netcdf=self.netcdf_path,
+                medians_path=self.medians_path,
                 coco=coco_test,
                 group_freq=self.group_freq,
                 compression=self.compression,

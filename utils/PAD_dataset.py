@@ -46,6 +46,7 @@ class PADDataset(Dataset):
             self,
             coco: COCO,
             root_path_netcdf:  Union[str, Path] = None,
+            medians_path: Union[str, Path] = None,
             bands: list = None,
             transforms=None,
             compression: str = 'gzip',
@@ -72,6 +73,8 @@ class PADDataset(Dataset):
         coco: COCO Object
             A COCO object containing the data.
         root_path_netcdf: Path or str, default None
+            The path containing the netcdf files.
+        medians_path: Path or str, default None
             The path containing the netcdf files.
         bands: list of str, default None
             A list of the bands to use. If None, then all available bands are
@@ -136,6 +139,11 @@ class PADDataset(Dataset):
             self.root_path_netcdf = Path(root_path_netcdf)
         else:
             self.root_path_netcdf = None
+
+        if medians_path is not None:
+            self.medians_path = Path(medians_path)
+        else:
+            self.medians_path = None
 
         # number of total patches is given by number of patches in coco
         self.num_patches = len(self.patch_ids)
@@ -220,7 +228,8 @@ class PADDataset(Dataset):
         self.num_buckets = len(pd.date_range(start=f'2020-01-01', end=f'2021-01-01', freq=self.group_freq)) - 1
 
         self.saved_medians = saved_medians
-        self.medians_dir = Path(f'logs/medians/{prefix}_medians_{group_freq}_{"".join(self.bands)}/{mode}')
+        #self.medians_dir = Path(f'logs/medians/{prefix}_medians_{group_freq}_{"".join(self.bands)}/{mode}')
+        self.medians_dir = Path(f'{medians_path}/{mode}')
 
 
     def get_padding_offset(self):
