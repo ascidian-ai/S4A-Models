@@ -9,10 +9,10 @@ models/__pycache__
 
 /venv/
 
-/coco_files/*.json
-/coco_files/*.png
-
-/dataset/netcdf/*.nc
-/dataset/oad/*.csv
-/logs/*
-/model_weights/**/*.ckpt
+*.json
+*.csv
+*.pkl
+*.npy
+*.nc
+*.png
+*.ckpt
