@@ -16,9 +16,7 @@ from model.PAD_unet import UNet
 
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
-#from pytorch_lightning.plugins import DDPPlugin # LightningDeprecationWarning: Passing <pytorch_lightning.plugins.training_type.ddp.DDPPlugin
-from pytorch_lightning.strategies.ddp import DDPStrategy
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 import torch
 
 from utils.PAD_datamodule import PADDataModule
@@ -402,6 +400,15 @@ def main():
         path_val = root_path_coco / 'coco_val.json'
         path_test = root_path_coco / 'coco_test.json'
 
+    try:
+        torch.cuda.is_available()
+        torch.cuda.device_count()
+        print(f'\nCUDA Version: {torch.version.cuda}\n')
+        model.cuda()
+    except:
+        print('\nGPU and/or CUDA not available.\n')
+        exit(1)
+
     if args.train:
         # Create Data Modules
         dm = PADDataModule(
@@ -431,10 +438,7 @@ def main():
 
         # TRAINING
         # Setup to multi-GPUs
-        dm.setup('fit')
-
-        # DEFAULT CALLBACKS used by the Trainer
-        # early_stopping = EarlyStopping('val_loss')
+        #dm.setup('fit')
 
         callbacks.append(
             ModelCheckpoint(
@@ -447,13 +451,9 @@ def main():
 
         tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
 
-        #my_ddp = DDPPlugin(find_unused_parameters=True)
-
-        trainer = pl.Trainer(#gpus=args.num_gpus,
-                             accelerator='cpu',
+        trainer = pl.Trainer(gpus=args.num_gpus,
                              enable_checkpointing=True,
                              num_nodes=args.num_nodes,
-                             #progress_bar_refresh_rate=20,
                              log_every_n_steps=1,
                              min_epochs=1,
                              max_epochs=max_epoch + 1,
@@ -462,12 +462,8 @@ def main():
                              callbacks=callbacks,
                              logger=tb_logger,
                              gradient_clip_val=10.0,
-                             # early_stop_callback=early_stopping,
-                             # checkpoint_callback=True,
                              resume_from_checkpoint=resume_from_checkpoint,
-                             fast_dev_run=args.devtest #,
-                             #strategy='ddp' if args.num_gpus > 1 else None ,
-                             #plugins=[my_ddp]
+                             fast_dev_run=args.devtest
                              )
 
         # Train model
@@ -500,20 +496,16 @@ def main():
 
         # TRAINING
         # Setup to multi-GPUs
-        dm.setup('test')
+        #dm.setup('test')
 
-        #my_ddp = DDPPlugin(find_unused_parameters=True)
+        my_ddp = DDPPlugin(find_unused_parameters=True)
 
-        trainer = pl.Trainer(#gpus=args.num_gpus,
-                             accelerator='cpu',
+        trainer = pl.Trainer(gpus=args.num_gpus,
                              enable_checkpointing=True,
                              num_nodes=args.num_nodes,
-                             #progress_bar_refresh_rate=20,
                              min_epochs=1,
                              max_epochs=2,
-                             precision=32#,
-                             #strategy='ddp' if args.num_gpus > 1 else None,
-                             #plugins=[my_ddp]
+                             precision=32
                              )
 
         # Test model
