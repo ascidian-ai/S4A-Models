@@ -1,0 +1,32 @@
+Create new environment in Anaconda
+python 3.8.13
+install JupyterLab
+
+conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+conda install pytorch-lightning==1.4.3
+conda install tensorboardX
+conda update tensorboard
+conda install transformers
+conda install timm
+conda install funcy
+conda install pycocotools
+conda install sentinelhub
+conda install sentinelsat
+
+pip install arff
+pip install scikit-multilearn
+
+conda install geopandas
+conda install xarray
+conda install netCDF4
+conda install ipywidgets
+conda install pytorch-lightning==1.5.10
+conda install rasterstats
+
+run Python at cmd line to verify cuda enabled and GPU
+>> import torch
+>> torch.cuda.is_available()
+>> exit()
+
+
+
