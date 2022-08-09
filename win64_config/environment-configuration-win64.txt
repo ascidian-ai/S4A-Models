@@ -3,7 +3,7 @@ python 3.8.13
 install JupyterLab
 
 conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
-conda install pytorch-lightning==1.4.3
+conda install pytorch-lightning==1.6.1
 conda install tensorboardX
 conda update tensorboard
 conda install transformers
@@ -20,7 +20,6 @@ conda install geopandas
 conda install xarray
 conda install netCDF4
 conda install ipywidgets
-conda install pytorch-lightning==1.5.10
 conda install rasterstats
 conda install seaborn
 
