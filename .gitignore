@@ -4,7 +4,7 @@ __pycache__
 utils/__pycache__
 utils/settings/__pycache__
 models/__pycache__
-
+lightning_logs/*
 .ipynb_checkpoints
 
 /venv/
