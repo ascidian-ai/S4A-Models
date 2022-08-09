@@ -184,6 +184,33 @@ def main():
     parser.add_argument('--num_nodes', type=int, default=1, required=False,
                              help='Number of nodes to use. Default 1')
 
+    print("-"*80,"\nSETUP MODEL & PROCESS ARGUMENTS")
+    print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print("-"*80)
+
+    try:
+        torch.cuda.empty_cache()
+        cuda_avail = torch.cuda.is_available()
+        cuda_dev_count = torch.cuda.device_count()
+
+        print(f'CUDA Version: {torch.version.cuda}')
+        print(f'PyTorch Version: {torch.version.__version__}')
+        print(f'PyTorch Lightning Version: {pl.__version__}')
+        print(f'Number of GPUs: {cuda_dev_count}')
+        print(f'GPU Name: {torch.cuda.get_device_name()}')
+
+        if cuda_avail:
+            torch_device = torch.device("cuda")
+        else:
+            torch_device = torch.device("cpu")
+
+        cuda_mem_info = torch.cuda.mem_get_info()
+        print(f'GPU Memory: {cuda_mem_info[0]/1024/1024/1024:4.2f}Gb Available out of {cuda_mem_info[1]/1024/1024/1024:4.2f}Gb Total')
+    except:
+        print('\nGPU and/or CUDA not available.')
+        exit(1)
+    print("-"*80)
+
     args = parser.parse_args()
 
     if (not args.train) and (args.load_checkpoint is None):
@@ -280,7 +307,7 @@ def main():
             crop_encoding[0] = 'Background/Other'
 
             model = ConvLSTM.load_from_checkpoint(resume_from_checkpoint,
-                                                  map_location=torch.device('cpu'),
+                                                  map_location=torch_device,
                                                   run_path=run_path,
                                                   linear_encoder=LINEAR_ENCODER,
                                                   crop_encoding=crop_encoding,
@@ -319,7 +346,7 @@ def main():
             crop_encoding[0] = 'Background/Other'
 
             model = ConvSTAR.load_from_checkpoint(resume_from_checkpoint,
-                                                  map_location=torch.device('cpu'),
+                                                  map_location=torch_device,
                                                   run_path=run_path,
                                                   linear_encoder=LINEAR_ENCODER,
                                                   crop_encoding=crop_encoding,
@@ -359,8 +386,7 @@ def main():
             crop_encoding[0] = 'Background/Other'
 
             model = UNet.load_from_checkpoint(resume_from_checkpoint,
-                                                  map_location=torch.device('cpu'),
-                                                  run_path=run_path,
+                                                  map_location=torch_device,                                                  run_path=run_path,
                                                   linear_encoder=LINEAR_ENCODER,
                                                   crop_encoding=crop_encoding,
                                                   checkpoint_epoch=init_epoch)
@@ -383,7 +409,7 @@ def main():
             crop_encoding[0] = 'Background/Other'
 
             model = TempCNN.load_from_checkpoint(args.load_checkpoint,
-                                                 map_location=torch.device('cpu'),
+                                                 map_location=torch_device,
                                                  input_dim=3,
                                                  nclasses=n_classes,
                                                  sequence_length=args.window_len,
@@ -400,14 +426,20 @@ def main():
         path_val = root_path_coco / 'coco_val.json'
         path_test = root_path_coco / 'coco_test.json'
 
-    try:
-        torch.cuda.is_available()
-        torch.cuda.device_count()
-        print(f'\nCUDA Version: {torch.version.cuda}\n')
-        model.cuda()
-    except:
-        print('\nGPU and/or CUDA not available.\n')
-        exit(1)
+    print("-"*80,"\nTRAIN MODEL")
+    print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print("-"*80)
+
+    tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
+
+    callbacks.append(
+        ModelCheckpoint(
+            dirpath=run_path / 'checkpoints',
+            monitor=monitor,
+            mode='min',
+            save_top_k=-1
+        )
+    )
 
     if args.train:
         # Create Data Modules
@@ -437,24 +469,10 @@ def main():
         )
 
         # TRAINING
-        # Setup to multi-GPUs
-        #dm.setup('fit')
-
-        callbacks.append(
-            ModelCheckpoint(
-                dirpath=run_path / 'checkpoints',
-                monitor=monitor,
-                mode='min',
-                save_top_k=-1
-            )
-        )
-
-        tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
-
         trainer = pl.Trainer(gpus=args.num_gpus,
                              enable_checkpointing=True,
                              num_nodes=args.num_nodes,
-                             log_every_n_steps=1,
+                             log_every_n_steps=10,
                              min_epochs=1,
                              max_epochs=max_epoch + 1,
                              check_val_every_n_epoch=1,
@@ -494,23 +512,33 @@ def main():
             return_parcels=args.parcel_loss
         )
 
+        print("-" * 80, "\nTEST MODEL")
+        print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        print("-" * 80)
+
         # TRAINING
-        # Setup to multi-GPUs
-        #dm.setup('test')
-
-        my_ddp = DDPPlugin(find_unused_parameters=True)
-
         trainer = pl.Trainer(gpus=args.num_gpus,
                              enable_checkpointing=True,
                              num_nodes=args.num_nodes,
+                             log_every_n_steps=10,
                              min_epochs=1,
                              max_epochs=2,
-                             precision=32
+                             precision=32,
+                             callbacks=callbacks,
+                             logger=tb_logger,
+                             gradient_clip_val=10.0
                              )
 
         # Test model
         model.eval()
-        trainer.test(model, datamodule=dm)
+        model.cuda(torch_device)
+
+        with torch.no_grad():
+            trainer.test(model, datamodule=dm)
+
+        print("-" * 80, "\nEXPERIMENT COMPLETE")
+        print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        print("-" * 80)
 
 
 if __name__ == '__main__':
