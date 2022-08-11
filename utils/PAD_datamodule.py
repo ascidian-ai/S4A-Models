@@ -272,7 +272,8 @@ class PADDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            pin_memory_device='cuda'
         )
 
     def val_dataloader(self):
@@ -281,7 +282,8 @@ class PADDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            pin_memory_device='cuda'
         )
 
     def test_dataloader(self):
@@ -290,5 +292,6 @@ class PADDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            pin_memory_device='cuda'
         )

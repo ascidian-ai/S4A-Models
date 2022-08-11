@@ -192,7 +192,6 @@ def main():
         torch.cuda.empty_cache()
         cuda_avail = torch.cuda.is_available()
         cuda_dev_count = torch.cuda.device_count()
-
         print(f'CUDA Version: {torch.version.cuda}')
         print(f'PyTorch Version: {torch.version.__version__}')
         print(f'PyTorch Lightning Version: {pl.__version__}')
@@ -481,7 +480,8 @@ def main():
                              logger=tb_logger,
                              gradient_clip_val=10.0,
                              resume_from_checkpoint=resume_from_checkpoint,
-                             fast_dev_run=args.devtest
+                             fast_dev_run=args.devtest,
+                             benchmark=True
                              )
 
         # Train model
@@ -520,13 +520,14 @@ def main():
         trainer = pl.Trainer(gpus=args.num_gpus,
                              enable_checkpointing=True,
                              num_nodes=args.num_nodes,
-                             log_every_n_steps=10,
+                             log_every_n_steps=1,
                              min_epochs=1,
                              max_epochs=2,
                              precision=32,
                              callbacks=callbacks,
                              logger=tb_logger,
-                             gradient_clip_val=10.0
+                             gradient_clip_val=10.0,
+                             benchmark=True
                              )
 
         # Test model
