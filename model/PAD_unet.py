@@ -8,7 +8,7 @@ https://github.com/PyTorchLightning/lightning-bolts/blob/master/pl_bolts/models/
 '''
 
 import os
-
+from datetime import datetime
 import numpy as np
 from tqdm import tqdm
 import copy
@@ -26,7 +26,8 @@ import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import seaborn as sns
-
+from sklearn.metrics._classification import confusion_matrix # added 20220812 Steven Tuften
+import pandas as pd # added 20220812 Steven Tuften
 
 def get_last_model_checkpoint(path):
     '''
@@ -162,7 +163,7 @@ class UNet(pl.LightningModule):
         self.best_loss = None
 
         num_discrete_labels = len(set(linear_encoder.values()))
-        self.confusion_matrix = torch.zeros([num_discrete_labels, num_discrete_labels])
+        self.confusion_matrix = np.zeros([num_discrete_labels, num_discrete_labels])  # 20220812 ST changed to np.zeros from torch.zeros
 
         self.class_weights = class_weights
         self.checkpoint_epoch = checkpoint_epoch
@@ -345,7 +346,7 @@ class UNet(pl.LightningModule):
         b, t, c, h, w = inputs.size()
         inputs = inputs.view(b, -1, h, w)   # (B, T * C, H, W)
 
-        pred = self(inputs).to(torch.long)  # (B, K, H, W)
+        pred = self(inputs) #.to(torch.long)  # (B, K, H, W) # Steve commented out casting
 
         # Reverse the logarithm of the LogSoftmax activation
         pred = torch.exp(pred)
@@ -364,17 +365,20 @@ class UNet(pl.LightningModule):
 
             pred_sparse = pred.argmax(axis=1)
 
-            label = label.flatten()
-            pred = pred_sparse.flatten()
+            label = label.flatten().to(device='cpu')
+            pred = pred_sparse.flatten().to(device='cpu')
 
             # Discretize predictions
             #bins = np.arange(-0.5, sorted(list(self.linear_encoder.values()))[-1] + 0.5, 1)
             #bins_idx = torch.bucketize(pred, torch.tensor(bins).cuda())
             #pred_disc = bins_idx - 1
 
-        for i in range(label.shape[0]):
-            self.confusion_matrix[label[i], pred[i]] += 1
-
+        # added 20220812 Steven Tuften
+        # Replace bespoke CM with sklearn method
+        cm_delta = confusion_matrix(label, pred)
+        self.confusion_matrix = self.confusion_matrix + cm_delta
+        #for i in range(label.shape[0]):
+        #    self.confusion_matrix[label[i], pred[i]] += 1
         return
 
 
@@ -410,8 +414,10 @@ class UNet(pl.LightningModule):
 
 
     def test_epoch_end(self, outputs):
-        self.confusion_matrix = self.confusion_matrix.cpu().detach().numpy()
+        self.testrun_path = Path(self.run_path / f'testrun_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+        self.testrun_path.mkdir(exist_ok=True, parents=True)
 
+        #self.confusion_matrix = self.confusion_matrix.cpu().detach().numpy() # Convert to ndarray
         self.confusion_matrix = self.confusion_matrix[1:, 1:]  # Drop zero label
 
         # Calculate metrics and confusion matrix
@@ -420,7 +426,7 @@ class UNet(pl.LightningModule):
         tp = np.diag(self.confusion_matrix)
         tn = self.confusion_matrix.sum() - (fp + fn + tp)
 
-        # Sensitivity, hit rate, recall, or true positive rate
+       # Sensitivity, hit rate, recall, or true positive rate
         tpr = tp / (tp + fn)
         # Specificity or true negative rate
         tnr = tn / (tn + fp)
@@ -441,7 +447,7 @@ class UNet(pl.LightningModule):
         accuracy = (tp + tn) / (tp + fp + fn + tn)
 
         # Export metrics in text file
-        metrics_file = self.run_path / f"evaluation_metrics_epoch{self.checkpoint_epoch}.csv"
+        metrics_file = self.testrun_path / f"evaluation_metrics_epoch{self.checkpoint_epoch}.csv"
 
         # Delete file if present
         metrics_file.unlink(missing_ok=True)
@@ -507,7 +513,11 @@ class UNet(pl.LightningModule):
         # high and visualization is difficult
         row_mins = self.confusion_matrix.min(axis=1)
         row_maxs = self.confusion_matrix.max(axis=1)
-        cm_norm = (self.confusion_matrix - row_mins[:, None]) / (row_maxs[:, None] - row_mins[:, None])
+
+        try: # 20220812 Steve
+            cm_norm = (row_maxs[:, None] - row_mins[:, None]) / (self.confusion_matrix - row_mins[:, None])
+        except: # 20220812 Steve
+            cm_norm = self.confusion_matrix # 20220812 Steve
 
         # Export Confusion Matrix
 
@@ -540,9 +550,9 @@ class UNet(pl.LightningModule):
         for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=2))
 
-        plt.savefig(self.run_path / f'confusion_matrix_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        plt.savefig(self.testrun_path / f'confusion_matrix_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
 
-        np.save(self.run_path / f'cm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
+        np.save(self.testrun_path / f'cm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
 
 
         # Export normalized Confusion Matrix
@@ -576,7 +586,7 @@ class UNet(pl.LightningModule):
         for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=2))
 
-        plt.savefig(self.run_path / f'confusion_matrix_norm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        plt.savefig(self.testrun_path / f'confusion_matrix_norm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
 
-        np.save(self.run_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
-        pickle.dump(self.linear_encoder, open(self.run_path / f'linear_encoder_epoch{self.checkpoint_epoch}.pkl', 'wb'))
+        np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
+        pickle.dump(self.linear_encoder, open(self.testrun_path / f'linear_encoder_epoch{self.checkpoint_epoch}.pkl', 'wb'))
