@@ -256,7 +256,6 @@ def main():
 
     # Trainer callbacks
     callbacks = []
-    monitor = 'val_loss'
 
     if args.binary_labels:
         n_classes = 2
@@ -431,16 +430,24 @@ def main():
 
     tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
 
-    callbacks.append(
-        ModelCheckpoint(
-            dirpath=run_path / 'checkpoints',
-            monitor=monitor,
-            mode='min',
-            save_top_k=-1
-        )
-    )
-
     if args.train:
+        callbacks.append(
+            ModelCheckpoint(
+                dirpath=run_path / 'checkpoints',
+                monitor='loss',
+                mode='min',
+                save_top_k=-1
+            )
+        )
+        callbacks.append(
+            ModelCheckpoint(
+                dirpath=run_path / 'checkpoints',
+                monitor='val_loss',
+                mode='min',
+                save_top_k=-1
+            )
+        )
+
         # Create Data Modules
         dm = PADDataModule(
             netcdf_path=netcdf_path,

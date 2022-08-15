@@ -7,11 +7,8 @@ Code adopted from:
 https://github.com/PyTorchLightning/lightning-bolts/blob/master/pl_bolts/models/vision/unet.py
 '''
 
-import os
 from datetime import datetime
 import numpy as np
-from tqdm import tqdm
-import copy
 from pathlib import Path
 import pickle
 
@@ -20,14 +17,14 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.optim import lr_scheduler
 import torch.optim as optim
-from tensorboardX import SummaryWriter
 import pytorch_lightning as pl
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import seaborn as sns
+
 from sklearn.metrics._classification import confusion_matrix # added 20220812 Steven Tuften
-import pandas as pd # added 20220812 Steven Tuften
+from torchmetrics.functional import dice # added 20220814 Steven Tuften
 
 def get_last_model_checkpoint(path):
     '''
@@ -116,7 +113,6 @@ class Up(nn.Module):
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
-
 class UNet(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
                  class_weights=None, crop_encoding=None, checkpoint_epoch=None,
@@ -162,6 +158,10 @@ class UNet(pl.LightningModule):
         self.avg_val_losses = []
         self.best_loss = None
 
+        self.starttime = datetime.now()
+        self.endtime = datetime.now()
+        self.duration = 0.0
+
         num_discrete_labels = len(set(linear_encoder.values()))
         self.confusion_matrix = np.zeros([num_discrete_labels, num_discrete_labels])  # 20220812 ST changed to np.zeros from torch.zeros
 
@@ -182,7 +182,6 @@ class UNet(pl.LightningModule):
                 self.lossfunction = nn.NLLLoss(ignore_index=0)
 
         self.crop_encoding = crop_encoding
-
         self.run_path = Path(run_path)
 
         input_channels = 4 * 6   # bands * time steps
@@ -211,6 +210,15 @@ class UNet(pl.LightningModule):
         self.learning_rate = learning_rate
         self.save_hyperparameters()
 
+        if self.training:
+            # Export metrics in text file
+            metrics_file = self.run_path / f"train_metrics_epoch{self.checkpoint_epoch}.csv"
+            metrics_file.unlink(missing_ok=True)  # Delete file if present
+
+            with open(metrics_file, "a") as f:
+                f.write('Mode,Epoch,Start Time,End Time,Duration (HH:MM:ss),Duration (sec),Loss,Learning Rate\n')
+
+        self.dice_score = []
 
     def forward(self, x):
         xi = [self.layers[0](x)]
@@ -339,14 +347,13 @@ class UNet(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         inputs = batch['medians']  # (B, T, C, H, W)
-
         label = batch['labels'].to(torch.long)  # (B, H, W)
 
         # Concatenate time series along channels dimension
         b, t, c, h, w = inputs.size()
         inputs = inputs.view(b, -1, h, w)   # (B, T * C, H, W)
 
-        pred = self(inputs) #.to(torch.long)  # (B, K, H, W) # Steve commented out casting
+        pred = self(inputs).to(torch.long)  # (B, K, H, W)
 
         # Reverse the logarithm of the LogSoftmax activation
         pred = torch.exp(pred)
@@ -365,8 +372,8 @@ class UNet(pl.LightningModule):
 
             pred_sparse = pred.argmax(axis=1)
 
-            label = label.flatten().to(device='cpu')
-            pred = pred_sparse.flatten().to(device='cpu')
+            label = label.cpu().detach().flatten() # flatten after numpy conversion is faster
+            pred = pred_sparse.cpu().detach().flatten() # flatten after numpy conversion is faster
 
             # Discretize predictions
             #bins = np.arange(-0.5, sorted(list(self.linear_encoder.values()))[-1] + 0.5, 1)
@@ -374,11 +381,15 @@ class UNet(pl.LightningModule):
             #pred_disc = bins_idx - 1
 
         # added 20220812 Steven Tuften
-        # Replace bespoke CM with sklearn method
+        # Replace bespoke Confusion Matrix calculation with sklearn method to speed up by order of magnitude!
         cm_delta = confusion_matrix(label, pred)
         self.confusion_matrix = self.confusion_matrix + cm_delta
         #for i in range(label.shape[0]):
         #    self.confusion_matrix[label[i], pred[i]] += 1
+
+        # added 20220815 Dice Score
+        step_dice_score = dice(pred, label, num_classes=12, multiclass=True, zero_division=1, average='none',ignore_index=0)
+        self.dice_score.append(step_dice_score.numpy())
         return
 
 
@@ -386,31 +397,49 @@ class UNet(pl.LightningModule):
         # Calculate average loss over an epoch
         train_loss = np.nanmean(self.epoch_train_losses)
         self.avg_train_losses.append(train_loss)
-
-        with open(self.run_path / "avg_train_losses.txt", 'a') as f:
-            f.write(f'{self.current_epoch}: {train_loss}\n')
-
-        with open(self.run_path / 'lrs.txt', 'a') as f:
-            f.write(f'{self.current_epoch}: {self.learning_rate}\n')
-
-        self.log('train_loss', train_loss, prog_bar=True)
+        self.log('loss', train_loss, prog_bar=True)
 
         # Clear list to track next epoch
         self.epoch_train_losses = []
 
+        self.endtime = datetime.now()
+        self.duration = self.endtime - self.starttime
+
+        # Export metrics in text file
+        metrics_file = self.run_path / f"train_metrics_epoch{self.checkpoint_epoch}.csv"
+        metrics_file.unlink(missing_ok=True)  # Delete file if present
+
+        with open(metrics_file, "a") as f:
+            f.write(f'TRAIN,{self.current_epoch},'
+                    f'{self.starttime.strftime("%Y-%m-%d %H:%M:%S")},{self.endtime.strftime("%Y-%m-%d %H:%M:%S")},'
+                    f'{self.duration},{self.duration.total_seconds()}s,'
+                    f'{train_loss},{self.learning_rate}\n')
+
+        self.starttime = datetime.now()
 
     def validation_epoch_end(self, outputs):
         # Calculate average loss over an epoch
         valid_loss = np.nanmean(self.epoch_valid_losses)
         self.avg_val_losses.append(valid_loss)
-
-        with open(self.run_path / "avg_val_losses.txt", 'a') as f:
-            f.write(f'{self.current_epoch}: {valid_loss}\n')
-
         self.log('val_loss', valid_loss, prog_bar=True)
 
         # Clear list to track next epoch
         self.epoch_valid_losses = []
+
+        self.endtime = datetime.now()
+        self.duration = self.endtime - self.starttime
+
+        # Export metrics in text file
+        metrics_file = self.run_path / f"train_metrics_epoch{self.checkpoint_epoch}.csv"
+        metrics_file.unlink(missing_ok=True)  # Delete file if present
+
+        with open(metrics_file, "a") as f:
+            f.write(f'VALIDATION,{self.current_epoch},'
+                    f'{self.starttime.strftime("%Y-%m-%d %H:%M:%S")},{self.endtime.strftime("%Y-%m-%d %H:%M:%S")},'
+                    f'{self.duration},{self.duration.total_seconds()}s,'
+                    f'{valid_loss},"N/A"\n')
+
+        self.starttime = datetime.now()
 
 
     def test_epoch_end(self, outputs):
@@ -419,6 +448,8 @@ class UNet(pl.LightningModule):
 
         #self.confusion_matrix = self.confusion_matrix.cpu().detach().numpy() # Convert to ndarray
         self.confusion_matrix = self.confusion_matrix[1:, 1:]  # Drop zero label
+        self.dice_score = np.array(self.dice_score)
+        self.dice_score = self.dice_score[:, 1:]  # Drop zero label
 
         # Calculate metrics and confusion matrix
         fp = self.confusion_matrix.sum(axis=0) - np.diag(self.confusion_matrix)
@@ -446,6 +477,9 @@ class UNet(pl.LightningModule):
         # Overall accuracy
         accuracy = (tp + tn) / (tp + fp + fn + tn)
 
+        self.endtime = datetime.now()
+        self.duration = self.endtime - self.starttime
+
         # Export metrics in text file
         metrics_file = self.testrun_path / f"evaluation_metrics_epoch{self.checkpoint_epoch}.csv"
 
@@ -453,6 +487,13 @@ class UNet(pl.LightningModule):
         metrics_file.unlink(missing_ok=True)
 
         with open(metrics_file, "a") as f:
+            f.write('TIMING\n')
+            f.write(f'Start,{self.starttime.strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'End,{self.endtime.strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'Duration (HH:MM:ss),"{self.duration}"\n')
+            f.write(f'Duration (sec),{self.duration.total_seconds()}s\n')
+
+            f.write('\nTEST RESULTS\n')
             row = 'Class'
             for k in sorted(self.linear_encoder.keys()):
                 if k == 0: continue
@@ -504,10 +545,24 @@ class UNet(pl.LightningModule):
                 row += f',{i:.4f}'
             f.write(row + '\n')
 
-            row = 'weighted macro-f1'
+            dice_score_avg = np.average(self.dice_score, axis=0)
+            row = "dice score"
+            for i in dice_score_avg:
+                row += f',{i:.4f}'
+            f.write(row + '\n')
+
+            f.write('\nWEIGHTED METRICS\n')
+            row = 'weighted accuracy,weighted macro-f1,weighted precision,weighted dice score'
+            f.write(row + '\n')
+
             class_samples = self.confusion_matrix.sum(axis=1)
+            weighted_acc = ((accuracy * class_samples) / class_samples.sum()).sum()
             weighted_f1 = ((f1 * class_samples) / class_samples.sum()).sum()
-            f.write(row + f',{weighted_f1:.4f}\n')
+            weighted_ppv = ((ppv * class_samples) / class_samples.sum()).sum()
+            weighted_dice = ((dice_score_avg * class_samples) / class_samples.sum()).sum()
+            f.write(f'{weighted_acc:.4f},{weighted_f1:.4f},{weighted_ppv:.4f},{weighted_dice:.4f}\n')
+
+
 
         # Normalize each row of the confusion matrix because class imbalance is
         # high and visualization is difficult
