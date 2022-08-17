@@ -13,6 +13,7 @@ from model.PAD_convLSTM import ConvLSTM
 from model.PAD_tempCNN import TempCNN
 from model.PAD_convSTAR import ConvSTAR
 from model.PAD_unet import UNet
+from model.PAD_unetTransformer import UNetTransformer
 
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
@@ -113,8 +114,8 @@ def main():
                              help='Perform a dev test run with this model')
 
     parser.add_argument('--model', type=str, required=True,
-                             choices=['convlstm', 'tempcnn', 'convstar', 'unet'],
-                             help='Model to use. One of [\'convlstm\', \'tempcnn\', \'convstar\', \'unet\']',
+                             choices=['convlstm', 'tempcnn', 'convstar', 'unet', 'unettransformer'],
+                             help='Model to use. One of [\'convlstm\', \'tempcnn\', \'convstar\', \'unet\', \'unettransformer\']',
                              )
 
     parser.add_argument('--parcel_loss', action='store_true', default=False, required=False,
@@ -388,6 +389,45 @@ def main():
                                                   linear_encoder=LINEAR_ENCODER,
                                                   crop_encoding=crop_encoding,
                                                   checkpoint_epoch=init_epoch)
+    elif args.model == 'unettransformer':
+        args.img_size = [int(dim) for dim in args.img_size]
+
+        results_path = create_model_log_path(log_path, prefix, args.model)
+
+        run_path, resume_from_checkpoint, max_epoch, init_epoch = \
+            resume_or_start(results_path, args.resume, args.train, args.num_epochs, args.load_checkpoint)
+
+        if args.train:
+            callbacks += [
+                LearningRateMonitor(logging_interval='step')
+            ]
+
+        if args.resume is not None:
+            # Restore optimizer's learning rate
+            with open(run_path / 'lrs.txt', 'r') as f:
+                for line in f:
+                    epoch_lr = line.strip().split(': ')
+                    if int(epoch_lr[0]) == init_epoch:
+                        init_learning_rate = float(epoch_lr[1])
+
+            model = UNetTransformer(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
+                         parcel_loss=args.parcel_loss, class_weights=class_weights,
+                         num_layers=3)
+        else:
+            model = UNetTransformer(run_path, LINEAR_ENCODER, parcel_loss=args.parcel_loss,
+                         class_weights=class_weights, num_layers=3)
+
+        if not args.train:
+            # Load the model for testing
+            crop_encoding_rev = {v: k for k, v in CROP_ENCODING.items()}
+            crop_encoding = {k: crop_encoding_rev[k] for k in LINEAR_ENCODER.keys() if k != 0}
+            crop_encoding[0] = 'Background/Other'
+
+            model = UNetTransformer.load_from_checkpoint(resume_from_checkpoint,
+                                              map_location=torch_device, run_path=run_path,
+                                              linear_encoder=LINEAR_ENCODER,
+                                              crop_encoding=crop_encoding,
+                                              checkpoint_epoch=init_epoch)
     elif args.model == 'tempcnn':
         args.img_size = (1, 1)
         args.bands = ['B03', 'B04', 'B08']

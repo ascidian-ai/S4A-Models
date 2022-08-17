@@ -113,7 +113,7 @@ class Up(nn.Module):
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
-class UNet(pl.LightningModule):
+class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
                  class_weights=None, crop_encoding=None, checkpoint_epoch=None,
                  num_layers=3):
@@ -147,7 +147,7 @@ class UNet(pl.LightningModule):
 
         self.num_layers = num_layers
 
-        super(UNet, self).__init__()
+        super(UNetTransformer, self).__init__()
 
         self.linear_encoder = linear_encoder
         self.parcel_loss = parcel_loss
