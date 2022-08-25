@@ -563,10 +563,7 @@ class UNetTransformer(pl.LightningModule):
         row_mins = self.confusion_matrix.min(axis=1)
         row_maxs = self.confusion_matrix.max(axis=1)
 
-        try: # 20220812 Steve
-            cm_norm = (row_maxs[:, None] - row_mins[:, None]) / (self.confusion_matrix - row_mins[:, None])
-        except: # 20220812 Steve
-            cm_norm = self.confusion_matrix # 20220812 Steve
+        cm_norm =  (self.confusion_matrix - row_mins[:, None]) / (row_maxs[:, None] - row_mins[:, None])
 
         # Export Confusion Matrix
 
