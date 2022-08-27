@@ -15,6 +15,7 @@ import pickle
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn import MultiheadAttention
 from torch.optim import lr_scheduler
 import torch.optim as optim
 import pytorch_lightning as pl
@@ -81,6 +82,29 @@ class Down(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, embed_dim: int, num_heads: int):
+        super().__init__()
+        self.mhsa = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
+    def forward(self, query, key=None, value=None, need_weights=False):
+        # query = embedding of shape (N,L,E) for unbatched input when batch_first=True
+        # key = embedding of shape (N,S,E) for unbatched input when batch_first=True
+        # value = embedding of shape (N,S,E) for unbatched input when batch_first=True
+
+        # number of features is 2nd dimension
+        features = query.size(dim=1)
+
+        # don't flatten batch or feature dimension, only flatten the last 2 dimensions being the pixel grid
+        input_tensor = torch.flatten(query, start_dim=2, end_dim=3)
+
+        # attn_output is of shape (N,L,E) where E = no of pixels in grid/image
+        attn_output = self.mhsa(input_tensor, key=input_tensor, value=input_tensor)
+
+        # reshape to original tensor shape
+        output_tensor = torch.reshape(attn_output[0],[-1, features, 15, 15])
+        return output_tensor
+
 
 
 class Up(nn.Module):
@@ -195,7 +219,13 @@ class UNetTransformer(pl.LightningModule):
             layers.append(Down(feats, feats * 2))
             feats *= 2
 
-        # Dencoder
+        # Self-Attention Module
+        # ---------------------
+        embedded_dimensions = 15*15 # dimension of pixel grad in final downsample layer
+        number_of_heads = 5 # embedded_dimensions must be perfectly divisable by this number
+        layers.append(MultiHeadSelfAttention(embed_dim=embedded_dimensions, num_heads=number_of_heads))
+
+        # Decoder
         # --------
         for _ in range(num_layers - 1):
             layers.append(Up(feats, feats // 2, False))
@@ -221,16 +251,27 @@ class UNetTransformer(pl.LightningModule):
         self.dice_score = []
 
     def forward(self, x):
+        #print(f"{x.size()}")
         xi = [self.layers[0](x)]
 
         # Down path
         for layer in self.layers[1:self.num_layers]:
+            #print(f"{xi[-1].size()}")
             xi.append(layer(xi[-1]))
 
-        # Up path
-        for i, layer in enumerate(self.layers[self.num_layers:-2]):
-            xi[-1] = layer(xi[-1], xi[-2-i])
+        # MHSA module
+        #print(f"{xi[-1].size()}")
+        xi.append(self.layers[self.num_layers](xi[-1]))
 
+        # Up path
+        for i, layer in enumerate(self.layers[(self.num_layers+1):-2]):
+            #print(f"{xi[-1].size()} | {xi[-3-i].size()}")
+            xi[-1] = layer(xi[-1], xi[-3-i]) # Propogate forward from matching Down layer
+
+        #for i, layer in enumerate(self.layers[self.num_layers:-2]): # original from unet model
+        #    xi[-1] = layer(xi[-1], xi[-2-i]) # Propogate forward from matching Down layer
+
+        #print(f"{xi[-1].size()}")
         xi[-1] = self.layers[-2](xi[-1])
 
         # Softmax

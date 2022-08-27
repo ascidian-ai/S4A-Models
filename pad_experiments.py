@@ -464,6 +464,19 @@ def main():
         path_val = root_path_coco / 'coco_val.json'
         path_test = root_path_coco / 'coco_test.json'
 
+    # -------------------------------------------------
+    # SAVE MODEL INFORMATION TO FILE
+    # Added 26Aug2022 by ST for debugging
+    if args.model == 'unet' or args.model == 'unettransformer':
+        from torchinfo import summary
+        torchinfo_modelstats = summary(model,
+                                       input_size=(args.batch_size, len(args.bands)*6, args.img_size[0], args.img_size[1]),
+                                       col_width=20,  col_names=["kernel_size", "input_size", "output_size", "num_params"],
+                                       row_settings=["var_names"],)
+        with open(f"{run_path}/modelinfo.txt", "w", encoding="utf-8") as tf:
+            tf.write(str(torchinfo_modelstats))
+    # -------------------------------------------------
+
     print("-"*80,"\nTRAIN MODEL")
     print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print("-"*80)
