@@ -485,7 +485,7 @@ class UNet(pl.LightningModule):
             f.write(f'Start,{self.starttime.strftime("%Y-%m-%d %H:%M:%S")}\n')
             f.write(f'End,{self.endtime.strftime("%Y-%m-%d %H:%M:%S")}\n')
             f.write(f'Duration (HH:MM:ss),"{self.duration}"\n')
-            f.write(f'Duration (sec),{self.duration.total_seconds()}s\n')
+            f.write(f'Duration (sec),{self.duration.total_seconds()}\n')
 
             f.write('\nTEST RESULTS\n')
             row = 'Class'
