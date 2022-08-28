@@ -24,6 +24,12 @@ from utils.PAD_datamodule import PADDataModule
 from utils.tools import font_colors
 from utils.settings.config import RANDOM_SEED, CROP_ENCODING, LINEAR_ENCODER, CLASS_WEIGHTS, BANDS
 
+
+########################################################
+# ADDED BY ST 17AUG2022 to auto email experiment status
+from utils.email import notification as email_notification
+########################################################
+
 # Set seed for everything
 pl.seed_everything(RANDOM_SEED)
 
@@ -184,6 +190,12 @@ def main():
                              help='Number of gpus to use (per node). Default 1')
     parser.add_argument('--num_nodes', type=int, default=1, required=False,
                              help='Number of nodes to use. Default 1')
+
+    # Send Email Status update
+    messagebody = f"""\
+    Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    Status: STARTED """
+    email_notification("DL Experiment | STARTED", messagebody)
 
     print("-"*80,"\nSETUP MODEL & PROCESS ARGUMENTS")
     print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -481,6 +493,12 @@ def main():
     print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print("-"*80)
 
+    # Send Email Status update
+    messagebody = f"""\
+    Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    Status: TRAINING PHASE STARTED """
+    email_notification("DL Experiment | TRAINING STARTED", messagebody)
+
     tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
 
     if args.train:
@@ -576,6 +594,12 @@ def main():
         print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         print("-" * 80)
 
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: TEST PHASE STARTED """
+        email_notification("DL Experiment | TESTING STARTED", messagebody)
+
         # TRAINING
         trainer = pl.Trainer(gpus=args.num_gpus,
                              enable_checkpointing=True,
@@ -596,11 +620,17 @@ def main():
 
         with torch.no_grad():
             trainer.test(model, datamodule=dm)
+        # END OF TESTING -------------------------------------------------
 
-        print("-" * 80, "\nEXPERIMENT COMPLETE")
-        print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        print("-" * 80)
+    print("-" * 80, "\nEXPERIMENT COMPLETE")
+    print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print("-" * 80)
 
+    # Send Email Status update
+    messagebody = f"""\
+    Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    Status: COMPLETED """
+    email_notification("DL Experiment | COMPLETE", messagebody)
 
 if __name__ == '__main__':
     main()

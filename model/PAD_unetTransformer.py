@@ -27,6 +27,12 @@ import seaborn as sns
 from sklearn.metrics._classification import confusion_matrix # added 20220812 Steven Tuften
 from torchmetrics.functional import dice # added 20220814 Steven Tuften
 
+########################################################
+# ADDED BY ST 17AUG2022 to auto email experiment status
+from utils.email import notification as email_notification
+########################################################
+
+
 def get_last_model_checkpoint(path):
     '''
     Browses through the given path and finds the last saved checkpoint of a
@@ -222,7 +228,7 @@ class UNetTransformer(pl.LightningModule):
         # Self-Attention Module
         # ---------------------
         embedded_dimensions = 15*15 # dimension of pixel grad in final downsample layer
-        number_of_heads = 5 # embedded_dimensions must be perfectly divisable by this number
+        number_of_heads = 25 # embedded_dimensions must be perfectly divisable by this number
         layers.append(MultiHeadSelfAttention(embed_dim=embedded_dimensions, num_heads=number_of_heads))
 
         # Decoder
@@ -455,6 +461,15 @@ class UNetTransformer(pl.LightningModule):
 
         self.starttime = datetime.now()
 
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: TRAINING EPOCH END
+        Epoch: {self.current_epoch}
+        Duration: {self.duration}
+        Loss: {train_loss}"""
+        email_notification("DL Experiment | TRAINING EPOCH END", messagebody)
+
     def validation_epoch_end(self, outputs):
         # Calculate average loss over an epoch
         valid_loss = np.nanmean(self.epoch_valid_losses)
@@ -475,6 +490,15 @@ class UNetTransformer(pl.LightningModule):
                     f'{valid_loss},"N/A"\n')
 
         self.starttime = datetime.now()
+
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: VALIDATION EPOCH END
+        Epoch: {self.current_epoch}
+        Duration: {self.duration}
+        Loss: {valid_loss}"""
+        email_notification("DL Experiment | VALIDATION EPOCH END", messagebody)
 
 
     def test_epoch_end(self, outputs):
@@ -526,7 +550,7 @@ class UNetTransformer(pl.LightningModule):
             f.write(f'Start,{self.starttime.strftime("%Y-%m-%d %H:%M:%S")}\n')
             f.write(f'End,{self.endtime.strftime("%Y-%m-%d %H:%M:%S")}\n')
             f.write(f'Duration (HH:MM:ss),"{self.duration}"\n')
-            f.write(f'Duration (sec),{self.duration.total_seconds()}s\n')
+            f.write(f'Duration (sec),{self.duration.total_seconds()}\n')
 
             f.write('\nTEST RESULTS\n')
             row = 'Class'
@@ -677,3 +701,13 @@ class UNetTransformer(pl.LightningModule):
 
         np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
         pickle.dump(self.linear_encoder, open(self.testrun_path / f'linear_encoder_epoch{self.checkpoint_epoch}.pkl', 'wb'))
+
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: TEST EPOCH END
+        Duration: {self.duration}
+        weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
+        {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
+        """
+        email_notification("DL Experiment | TEST EPOCH END", messagebody)
