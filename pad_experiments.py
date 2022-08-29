@@ -190,8 +190,14 @@ def main():
                              help='Number of gpus to use (per node). Default 1')
     parser.add_argument('--num_nodes', type=int, default=1, required=False,
                              help='Number of nodes to use. Default 1')
+
+    # Arguments specifically for UNet Transformer architecture
     parser.add_argument('--num_heads', type=int, default=1, required=False,
                         help='Number of heads for Multi Head Attention Modules in UNet Transformer. Default 1')
+    parser.add_argument('--mhsa', action='store_true', default=True, required=False,
+                             help='Use MultiHeaded Self Attention module with U-Net as proposed by Petit et al(2021).')
+    parser.add_argument('--mhca', action='store_true', default=False, required=False,
+                             help='Use MultiHeaded Cross Attention module with U-Net as proposed by Petit et al(2021).')
 
     # Send Email Status update
     messagebody = f"""\
@@ -430,11 +436,13 @@ def main():
             model = UNetTransformer(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
                                     parcel_loss=args.parcel_loss, class_weights=class_weights,
                                     num_layers=3, num_heads=self.num_heads,
+                                    mhsa = args.mhsa, mhca = args.mhca,
                                     num_bands=self.num_bands, img_dims=args.img_size[0])
         else:
             model = UNetTransformer(run_path, LINEAR_ENCODER,
                                     parcel_loss=args.parcel_loss, class_weights=class_weights,
                                     num_layers=3, num_heads=self.num_heads,
+                                    mhsa=args.mhsa, mhca=args.mhca,
                                     num_bands=self.num_bands, img_dims=args.img_size[0])
 
         if not args.train:

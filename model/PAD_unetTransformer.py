@@ -148,7 +148,7 @@ class Up(nn.Module):
 class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
                  class_weights=None, crop_encoding=None, checkpoint_epoch=None,
-                 num_layers=3, num_heads=1, num_bands=4, img_dims=61):
+                 num_layers=3, num_heads=1, num_bands=4, img_dims=61, mhsa=True, mhca=False):
         '''
         Parameters:
         -----------
@@ -179,6 +179,12 @@ class UNetTransformer(pl.LightningModule):
             The number of image bands or layers.
         img_dims: int, default 61
             The number of pixels in each row of the input image.
+        mhsa: boolean, default True
+            If True, then add a Multi Headed Self Attention module between the lay Down layer and first Up layer.
+            If False, then no Multi Headed Self Attention module is added but a MHCA must be added instead.
+        mhca: boolean, default False
+            If True, then add a Multi Headed Cross Attention module in skip connections from Down layers to Up layers.
+            If False, then no Multi Headed Cross Attention module is added but a MHSA must be added instead.
         '''
         if num_layers < 1:
             raise ValueError(f"num_layers = {num_layers}, expected: num_layers > 0")
@@ -186,6 +192,9 @@ class UNetTransformer(pl.LightningModule):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.img_dims = img_dims
+
+        assert mhsa == True or mhca == True, "Warning: Must specify one or both of 'mhsa' or 'mhca' as True.\\" \
+                                             "Use a U-Net model if no attention modules are required."
 
         super(UNetTransformer, self).__init__()
 
@@ -243,9 +252,10 @@ class UNetTransformer(pl.LightningModule):
             layers.append(Down(feats, feats * 2))
             feats *= 2
 
-        # Self-Attention Module
-        # ---------------------
-        layers.append(MultiHeadSelfAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
+        if mhsa:
+            # Self-Attention Module
+            # ---------------------
+            layers.append(MultiHeadSelfAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
 
         # Decoder
         # --------
@@ -273,27 +283,24 @@ class UNetTransformer(pl.LightningModule):
         self.dice_score = []
 
     def forward(self, x):
-        #print(f"{x.size()}")
         xi = [self.layers[0](x)]
 
         # Down path
         for layer in self.layers[1:self.num_layers]:
-            #print(f"{xi[-1].size()}")
             xi.append(layer(xi[-1]))
 
         # MHSA module
-        #print(f"{xi[-1].size()}")
-        xi.append(self.layers[self.num_layers](xi[-1]))
+        if mhsa:
+            xi.append(self.layers[self.num_layers](xi[-1]))
 
         # Up path
-        for i, layer in enumerate(self.layers[(self.num_layers+1):-2]):
-            #print(f"{xi[-1].size()} | {xi[-3-i].size()}")
-            xi[-1] = layer(xi[-1], xi[-3-i]) # Propogate forward from matching Down layer
+        if mhsa:
+            for i, layer in enumerate(self.layers[(self.num_layers+1):-2]):
+                xi[-1] = layer(xi[-1], xi[-3-i]) # Propogate forward from matching Down layer
+        else:
+            for i, layer in enumerate(self.layers[self.num_layers:-2]): # original from unet model
+                xi[-1] = layer(xi[-1], xi[-2-i]) # Propogate forward from matching Down layer
 
-        #for i, layer in enumerate(self.layers[self.num_layers:-2]): # original from unet model
-        #    xi[-1] = layer(xi[-1], xi[-2-i]) # Propogate forward from matching Down layer
-
-        #print(f"{xi[-1].size()}")
         xi[-1] = self.layers[-2](xi[-1])
 
         # Softmax
