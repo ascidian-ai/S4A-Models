@@ -92,7 +92,9 @@ class Down(nn.Module):
 class MultiHeadSelfAttention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
-        self.mhsa = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
+        self.embed_dim = embed_dim
+        self.embed_len = embed_dim * embed_dim
+        self.mhsa = nn.MultiheadAttention(embed_dim=self.embed_len, num_heads=num_heads, batch_first=True)
     def forward(self, query, key=None, value=None, need_weights=False):
         # query = embedding of shape (N,L,E) for unbatched input when batch_first=True
         # key = embedding of shape (N,S,E) for unbatched input when batch_first=True
@@ -108,7 +110,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_output = self.mhsa(input_tensor, key=input_tensor, value=input_tensor)
 
         # reshape to original tensor shape
-        output_tensor = torch.reshape(attn_output[0],[-1, features, 15, 15])
+        output_tensor = torch.reshape(attn_output[0],[-1, features, self.embed_dim, self.embed_dim])
         return output_tensor
 
 
@@ -227,9 +229,10 @@ class UNetTransformer(pl.LightningModule):
         # Calculate the number of embedded dimensions from the number of heads, number of layers and input dimensions
         layer_dim = self.img_dim
         for i in range(self.num_layers - 1): layer_dim = layer_dim // 2
-        self.embed_dim = layer_dim * layer_dim  # dimension of pixel grad in final downsample layer
-        self.head_dim = self.embed_dim // self.num_heads
-        assert self.head_dim * self.num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+        self.embed_dim = layer_dim  # dimension of pixel grid in final downsample layer
+        self.embed_len = layer_dim * layer_dim
+        self.head_dim = self.embed_len // self.num_heads
+        assert self.head_dim * self.num_heads == self.embed_len, "embed_len must be divisible by num_heads"
 
         # Encoder
         # -------
