@@ -194,10 +194,18 @@ def main():
     # Arguments specifically for UNet Transformer architecture
     parser.add_argument('--num_heads', type=int, default=1, required=False,
                         help='Number of heads for Multi Head Attention Modules in UNet Transformer. Default 1')
-    parser.add_argument('--mhsa', action='store_true', default=True, required=False,
+    parser.add_argument('--num_layers', type=int, default=3, required=False,
+                        help='Number of down and up layers in U-Net architecture. Default 3')
+    parser.add_argument('--mhsa', action='store_true', default=False, required=False,
                              help='Use MultiHeaded Self Attention module with U-Net as proposed by Petit et al(2021).')
     parser.add_argument('--mhca', action='store_true', default=False, required=False,
                              help='Use MultiHeaded Cross Attention module with U-Net as proposed by Petit et al(2021).')
+
+    args = parser.parse_args()
+    print("="*80,"\nCOMMAND LINE ARGUMENTS")
+    print("-"*80)
+    for k, v in vars(args).items():
+        print(f'--{k} {v}')
 
     # Send Email Status update
     messagebody = f"""\
@@ -231,8 +239,6 @@ def main():
         exit(1)
     print("-"*80)
 
-    args = parser.parse_args()
-    self.num_heads = args.num_heads
 
     if (not args.train) and (args.load_checkpoint is None):
         print('Error: You should provide the checkpoint to load for model testing!')
@@ -293,7 +299,7 @@ def main():
     if args.bands is None:
         args.bands = ['B02', 'B03', 'B04', 'B08']
 
-    self.num_bands = len(args.bands)
+    num_bands = len(args.bands)
 
     if args.model == 'convlstm':
         args.img_size = [int(dim) for dim in args.img_size]
@@ -396,10 +402,10 @@ def main():
 
             model = UNet(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
                          parcel_loss=args.parcel_loss, class_weights=class_weights,
-                         num_layers=3)
+                         num_layers=args.num_layers)
         else:
             model = UNet(run_path, LINEAR_ENCODER, parcel_loss=args.parcel_loss,
-                         class_weights=class_weights, num_layers=3)
+                         class_weights=class_weights, num_layers=args.num_layers)
 
         if not args.train:
             # Load the model for testing
@@ -435,15 +441,15 @@ def main():
 
             model = UNetTransformer(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
                                     parcel_loss=args.parcel_loss, class_weights=class_weights,
-                                    num_layers=3, num_heads=self.num_heads,
+                                    num_layers=args.num_layers, num_heads=args.num_heads, window_len=args.window_len,
                                     mhsa = args.mhsa, mhca = args.mhca,
-                                    num_bands=self.num_bands, img_dims=args.img_size[0])
+                                    num_bands=num_bands, img_dim=args.img_size[0])
         else:
             model = UNetTransformer(run_path, LINEAR_ENCODER,
                                     parcel_loss=args.parcel_loss, class_weights=class_weights,
-                                    num_layers=3, num_heads=self.num_heads,
+                                    num_layers=args.num_layers, num_heads=args.num_heads, window_len=args.window_len,
                                     mhsa=args.mhsa, mhca=args.mhca,
-                                    num_bands=self.num_bands, img_dims=args.img_size[0])
+                                    num_bands=num_bands, img_dim=args.img_size[0])
 
         if not args.train:
             # Load the model for testing

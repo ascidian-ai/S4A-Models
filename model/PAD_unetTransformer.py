@@ -89,9 +89,10 @@ class Down(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-class MultiHeadSelfAttention(nn.Module):
+class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
+        self.num_heads = num_heads
         self.embed_dim = embed_dim
         self.embed_len = embed_dim * embed_dim
         self.mhsa = nn.MultiheadAttention(embed_dim=self.embed_len, num_heads=num_heads, batch_first=True)
@@ -101,16 +102,29 @@ class MultiHeadSelfAttention(nn.Module):
         # value = embedding of shape (N,S,E) for unbatched input when batch_first=True
 
         # number of features is 2nd dimension
-        features = query.size(dim=1)
+        batch_size = query.size(dim=0)
+        channels = query.size(dim=1)
+        input_dimension = query.size(dim=2)
+
+        # Scale down
+        if self.embed_dim != input_dimension:  # if input doesn't match embedding dimension
+            downsample = torch.nn.Upsample(size=[self.embed_dim, self.embed_dim], mode='bilinear')
+            input_tensor = downsample(query)
 
         # don't flatten batch or feature dimension, only flatten the last 2 dimensions being the pixel grid
-        input_tensor = torch.flatten(query, start_dim=2, end_dim=3)
+        input_tensor = torch.flatten(input_tensor, start_dim=2, end_dim=3)
 
         # attn_output is of shape (N,L,E) where E = no of pixels in grid/image
         attn_output = self.mhsa(input_tensor, key=input_tensor, value=input_tensor)
 
         # reshape to original tensor shape
-        output_tensor = torch.reshape(attn_output[0],[-1, features, self.embed_dim, self.embed_dim])
+        output_tensor = torch.reshape(attn_output[0], [batch_size, channels, self.embed_dim, self.embed_dim])
+
+        # Scale up
+        if self.embed_dim != input_dimension:  # if input doesn't match embedding dimension
+            upsample = torch.nn.Upsample(size=[input_dimension, input_dimension], mode='bilinear')
+            output_tensor = upsample(output_tensor)
+
         return output_tensor
 
 
@@ -119,9 +133,11 @@ class Up(nn.Module):
     """Upsampling (by either bilinear interpolation or transpose convolutions) followed by concatenation of feature
     map from contracting path, followed by DoubleConv."""
 
-    def __init__(self, in_ch: int, out_ch: int, bilinear: bool = False):
+    def __init__(self, in_ch: int, out_ch: int, bilinear: bool = False,
+                 mhca: bool = False, embed_dim: int =61, num_heads: int = 1):
         super().__init__()
         self.upsample = None
+        self.mhca = mhca
         if bilinear:
             self.upsample = nn.Sequential(
                 nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
@@ -130,10 +146,20 @@ class Up(nn.Module):
         else:
             self.upsample = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
 
+        if self.mhca:
+            # Call Cross-Attention Module
+            # ---------------------
+            self.mhca_module = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
+
         self.conv = DoubleConv(in_ch, out_ch)
 
     def forward(self, x1, x2):
         x1 = self.upsample(x1)
+
+        if self.mhca:
+            # Call Cross-Attention Module
+            # ---------------------
+            x2 = self.mhca_module(x2, x2)
 
         # Pad x1 to the size of x2
         diff_h = x2.shape[2] - x1.shape[2]
@@ -148,7 +174,7 @@ class Up(nn.Module):
 class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
                  class_weights=None, crop_encoding=None, checkpoint_epoch=None,
-                 num_layers=3, num_heads=1, num_bands=4, img_dims=61, mhsa=True, mhca=False):
+                 num_layers=3, num_heads=1, num_bands=4, img_dim=61, mhsa=True, mhca=False, window_len=6):
         '''
         Parameters:
         -----------
@@ -185,18 +211,28 @@ class UNetTransformer(pl.LightningModule):
         mhca: boolean, default False
             If True, then add a Multi Headed Cross Attention module in skip connections from Down layers to Up layers.
             If False, then no Multi Headed Cross Attention module is added but a MHSA must be added instead.
+        window_len: int, default 6
+            The length of the rolling window to be used (in months). Default 6.
         '''
+        super(UNetTransformer, self).__init__()
+
         if num_layers < 1:
             raise ValueError(f"num_layers = {num_layers}, expected: num_layers > 0")
 
         self.num_layers = num_layers
         self.num_heads = num_heads
-        self.img_dims = img_dims
+        self.img_dim = img_dim
+        self.mhsa = mhsa
+        self.mhca = mhca
 
-        assert mhsa == True or mhca == True, "Warning: Must specify one or both of 'mhsa' or 'mhca' as True.\\" \
+        assert mhsa == True or mhca == True, "Warning: Must specify one or both of 'mhsa' or 'mhca' as True.\n" \
                                              "Use a U-Net model if no attention modules are required."
-
-        super(UNetTransformer, self).__init__()
+        if mhsa and not mhca:
+            self.model_desc = "U-Net with MHSA only"
+        elif mhca and not mhsa:
+            self.model_desc = "U-Net with MHCA only"
+        else:
+            self.model_desc = "U-Net Transformer (U-Net with MHSA and MHCA)"
 
         self.linear_encoder = linear_encoder
         self.parcel_loss = parcel_loss
@@ -233,7 +269,7 @@ class UNetTransformer(pl.LightningModule):
         self.crop_encoding = crop_encoding
         self.run_path = Path(run_path)
 
-        input_channels = num_bands * 6   # bands * time steps
+        input_channels = num_bands * window_len   # bands * time steps (Window lengths ie. number of rolling months)
 
         # Calculate the number of embedded dimensions from the number of heads, number of layers and input dimensions
         layer_dim = self.img_dim
@@ -243,25 +279,31 @@ class UNetTransformer(pl.LightningModule):
         self.head_dim = self.embed_len // self.num_heads
         assert self.head_dim * self.num_heads == self.embed_len, "embed_len must be divisible by num_heads"
 
+        feats = 64
+
         # Encoder
         # -------
-        layers = [DoubleConv(input_channels, 64)]
+        layers = [DoubleConv(input_channels, feats)]
 
-        feats = 64
         for _ in range(num_layers - 1):
             layers.append(Down(feats, feats * 2))
             feats *= 2
 
-        if mhsa:
+        if self.mhsa:
             # Self-Attention Module
             # ---------------------
-            layers.append(MultiHeadSelfAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
+            layers.append(MultiHeadAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
 
         # Decoder
-        # --------
-        for _ in range(num_layers - 1):
-            layers.append(Up(feats, feats // 2, False))
-            feats //= 2
+        # -------- # Hard code layers with embed_dim = 30 and 61
+        layers.append(Up(feats, feats // 2, False, mhca=self.mhca, embed_dim=15, num_heads=3 )) # originally embed_dim=30
+        feats //= 2
+        layers.append(Up(feats, feats // 2, False, mhca=self.mhca, embed_dim=15, num_heads=3 )) # originally embed_dim=61
+        feats //= 2
+        #for _ in range(num_layers - 1):
+        #    layers.append(Up(feats, feats // 2, False,
+        #                     mhca=self.mhca, embed_dim=30, num_heads=self.num_heads ))
+        #    feats //= 2
 
         layers.append(nn.Conv2d(feats, num_discrete_labels, kernel_size=1))
         layers.append(nn.LogSoftmax(dim=1))
@@ -290,16 +332,18 @@ class UNetTransformer(pl.LightningModule):
             xi.append(layer(xi[-1]))
 
         # MHSA module
-        if mhsa:
+        if self.mhsa:
             xi.append(self.layers[self.num_layers](xi[-1]))
 
         # Up path
-        if mhsa:
+        if self.mhsa:
             for i, layer in enumerate(self.layers[(self.num_layers+1):-2]):
-                xi[-1] = layer(xi[-1], xi[-3-i]) # Propogate forward from matching Down layer
+                xi[-1] = layer(xi[-1], xi[-3-i]) # Skip connection from first Down layer
+                #xi[-1] = layer(xi[-1], xi[-2-(2*i)]) # Skip connection from matching Down layer
         else:
             for i, layer in enumerate(self.layers[self.num_layers:-2]): # original from unet model
-                xi[-1] = layer(xi[-1], xi[-2-i]) # Propogate forward from matching Down layer
+                xi[-1] = layer(xi[-1], xi[-2-i]) # Skip connection from first Down layer
+                #xi[-1] = layer(xi[-1], xi[-1-(2*i)])  # Skip connection from matching Down layer
 
         xi[-1] = self.layers[-2](xi[-1])
 
@@ -730,6 +774,8 @@ class UNetTransformer(pl.LightningModule):
         Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         Status: TEST EPOCH END
         Duration: {self.duration}
+        Model: {self.model_desc}
+        Number of Heads: {self.num_heads}
         weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
         {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
         """
