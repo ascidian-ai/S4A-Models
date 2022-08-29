@@ -146,7 +146,7 @@ class Up(nn.Module):
 class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
                  class_weights=None, crop_encoding=None, checkpoint_epoch=None,
-                 num_layers=3):
+                 num_layers=3, num_heads=1, num_bands=4, img_dims=61):
         '''
         Parameters:
         -----------
@@ -171,11 +171,19 @@ class UNetTransformer(pl.LightningModule):
             The epoch loaded for testing.
         num_layers: int, default 3
             The number of layers to use in each path.
+        num_heads: int, default 1
+            The number of heads in the Multi Headed Attention modules.
+        num_bands: int, default 4
+            The number of image bands or layers.
+        img_dims: int, default 61
+            The number of pixels in each row of the input image.
         '''
         if num_layers < 1:
             raise ValueError(f"num_layers = {num_layers}, expected: num_layers > 0")
 
         self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.img_dims = img_dims
 
         super(UNetTransformer, self).__init__()
 
@@ -214,7 +222,14 @@ class UNetTransformer(pl.LightningModule):
         self.crop_encoding = crop_encoding
         self.run_path = Path(run_path)
 
-        input_channels = 4 * 6   # bands * time steps
+        input_channels = num_bands * 6   # bands * time steps
+
+        # Calculate the number of embedded dimensions from the number of heads, number of layers and input dimensions
+        layer_dim = self.img_dim
+        for i in range(self.num_layers - 1): layer_dim = layer_dim // 2
+        self.embed_dim = layer_dim * layer_dim  # dimension of pixel grad in final downsample layer
+        self.head_dim = self.embed_dim // self.num_heads
+        assert self.head_dim * self.num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         # Encoder
         # -------
@@ -227,9 +242,7 @@ class UNetTransformer(pl.LightningModule):
 
         # Self-Attention Module
         # ---------------------
-        embedded_dimensions = 15*15 # dimension of pixel grad in final downsample layer
-        number_of_heads = 25 # embedded_dimensions must be perfectly divisable by this number
-        layers.append(MultiHeadSelfAttention(embed_dim=embedded_dimensions, num_heads=number_of_heads))
+        layers.append(MultiHeadSelfAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
 
         # Decoder
         # --------
