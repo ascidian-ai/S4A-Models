@@ -78,6 +78,30 @@ class DoubleConv(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class SingleConv(nn.Module):
+    def __init__(self, in_ch: int, out_ch: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=1, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class SingleConvSigUp(nn.Module):
+    def __init__(self, in_ch: int, out_ch: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=1, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.Sigmoid(),
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+        )
+
+    def forward(self, x):
+        return self.net(x)
 
 class Down(nn.Module):
     """Downscale with MaxPool => DoubleConvolution block."""
@@ -114,8 +138,11 @@ class MultiHeadAttention(nn.Module):
         # don't flatten batch or feature dimension, only flatten the last 2 dimensions being the pixel grid
         input_tensor = torch.flatten(query, start_dim=2, end_dim=3)
 
+        if key == None: key = input_tensor
+        if value == None: value = input_tensor
+
         # attn_output is of shape (N,L,E) where E = no of pixels in grid/image
-        attn_output = self.mhsa(input_tensor, key=input_tensor, value=input_tensor)
+        attn_output = self.mhsa(input_tensor, key=key, value=value)
 
         # reshape to original tensor shape
         output_tensor = torch.reshape(attn_output[0], [batch_size, channels, self.embed_dim, self.embed_dim])
@@ -133,43 +160,50 @@ class Up(nn.Module):
     """Upsampling (by either bilinear interpolation or transpose convolutions) followed by concatenation of feature
     map from contracting path, followed by DoubleConv."""
 
-    def __init__(self, in_ch: int, out_ch: int, bilinear: bool = False,
-                 mhca: bool = False, embed_dim: int =61, num_heads: int = 1):
+    def __init__(self, in_ch: int, out_ch: int,
+                 mhca: bool = False, embed_dim: int=15, num_heads: int = 1):
         super().__init__()
-        self.upsample = None
         self.mhca = mhca
-        if bilinear:
-            self.upsample = nn.Sequential(
-                nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-                nn.Conv2d(in_ch, in_ch // 2, kernel_size=1),
-            )
+        self.doubleconv = DoubleConv(in_ch, out_ch)
+
+        # Call Cross-Attention Module
+        # ---------------------
+        if self.mhca:
+            #self.mhca_module = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
+            self.mhca_module = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
+            self.upsample2x2Conv3x3 = nn.Sequential(
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+                    nn.Conv2d(in_ch, in_ch // 2, kernel_size=3),
+                )
+            self.conv1x1BNReLu = SingleConv(in_ch, out_ch)
+            self.conv1x1BNSigmoidUpsample = SingleConvSigUp(in_ch, out_ch)
         else:
             self.upsample = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
 
-        if self.mhca:
-            # Call Cross-Attention Module
-            # ---------------------
-            self.mhca_module = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
-
-        self.conv = DoubleConv(in_ch, out_ch)
-
     def forward(self, x1, x2):
-        x1 = self.upsample(x1)
-
         if self.mhca:
             # Call Cross-Attention Module
             # ---------------------
-            x2 = self.mhca_module(x2, x2)
+            Q = K = self.conv1x1BNReLu(x1)
+            V = self.conv1x1BNReLu(x2)
+            A = self.mhca_module(query=Q, key=K, value=V)
+            Z = self.conv1x1BNSigmoidUpsample(A)
 
-        # Pad x1 to the size of x2
-        diff_h = x2.shape[2] - x1.shape[2]
-        diff_w = x2.shape[3] - x1.shape[3]
+            x1 = self.upsample2x2Conv3x3(x1)
+            x1 = self.conv1x1BNReLu(x1)
+            x2 = torch.mul(x2,Z)
+        else:
+            x1 = self.upsample(x1)
 
-        x1 = F.pad(x1, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
+            # Pad x1 to the size of x2
+            diff_h = x2.shape[2] - x1.shape[2]
+            diff_w = x2.shape[3] - x1.shape[3]
+
+            x1 = F.pad(x1, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
 
         # Concatenate along the channels axis
         x = torch.cat([x2, x1], dim=1)
-        return self.conv(x)
+        return self.doubleconv(x)
 
 class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
@@ -303,7 +337,7 @@ class UNetTransformer(pl.LightningModule):
 
         # Decoder
         for _ in range(num_layers - 1):
-            layers.append(Up(feats, feats // 2, False,
+            layers.append(Up(feats, feats // 2,
                              mhca=self.mhca, embed_dim=15, num_heads=3 ))
             feats //= 2
 
