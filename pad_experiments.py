@@ -98,11 +98,21 @@ def resume_or_start(results_path, resume, train, num_epochs, load_checkpoint):
     return run_path, resume_from_checkpoint, max_epoch, init_epoch
 
 
-def create_model_log_path(log_path, prefix, model):
+def create_model_log_path(log_path, prefix, args):
     '''
     Creates the path to contain results for the given model.
     '''
-    results_path = log_path / f'{model}' / f'{prefix}'
+    if args.model == 'unettransformer':
+        if args.mhsa and not args.mhca:
+            model_path = "unet_mhsa"
+        elif args.mhca and not args.mhsa:
+            model_path = "unet_mhca"
+        else:
+            model_path = "unet_transformer"
+    else:
+        model_path = args.model
+
+    results_path = log_path / f'{model_path}' / f'{prefix}'
     results_path.mkdir(exist_ok=True, parents=True)
 
     return results_path
@@ -290,6 +300,11 @@ def main():
     else:
         n_classes = len(list(CROP_ENCODING.values())) + 1
 
+    # Map Crop Encodings
+    crop_encoding_rev = {v: k for k, v in CROP_ENCODING.items()}
+    crop_encoding = {k: crop_encoding_rev[k] for k in LINEAR_ENCODER.keys() if k != 0}
+    crop_encoding[0] = 'Background/Other'
+
     if args.weighted_loss:
         class_weights = {LINEAR_ENCODER[k]: v for k, v in CLASS_WEIGHTS.items()}
     else:
@@ -304,7 +319,7 @@ def main():
     if args.model == 'convlstm':
         args.img_size = [int(dim) for dim in args.img_size]
 
-        results_path = create_model_log_path(log_path, prefix, args.model)
+        results_path = create_model_log_path(log_path, prefix, args)
 
         run_path, resume_from_checkpoint, max_epoch, init_epoch = \
             resume_or_start(results_path, args.resume, args.train, args.num_epochs, args.load_checkpoint)
@@ -343,7 +358,7 @@ def main():
     elif args.model == 'convstar':
         args.img_size = [int(dim) for dim in args.img_size]
 
-        results_path = create_model_log_path(log_path, prefix, args.model)
+        results_path = create_model_log_path(log_path, prefix, args)
 
         run_path, resume_from_checkpoint, max_epoch, init_epoch = \
             resume_or_start(results_path, args.resume, args.train, args.num_epochs, args.load_checkpoint)
@@ -382,7 +397,7 @@ def main():
     elif args.model == 'unet':
         args.img_size = [int(dim) for dim in args.img_size]
 
-        results_path = create_model_log_path(log_path, prefix, args.model)
+        results_path = create_model_log_path(log_path, prefix, args)
 
         run_path, resume_from_checkpoint, max_epoch, init_epoch = \
             resume_or_start(results_path, args.resume, args.train, args.num_epochs, args.load_checkpoint)
@@ -400,28 +415,24 @@ def main():
                     if int(epoch_lr[0]) == init_epoch:
                         init_learning_rate = float(epoch_lr[1])
 
-            model = UNet(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
+            model = UNet(run_path, LINEAR_ENCODER, crop_encoding=crop_encoding,
+                         learning_rate=init_learning_rate,
                          parcel_loss=args.parcel_loss, class_weights=class_weights,
                          num_layers=args.num_layers)
         else:
-            model = UNet(run_path, LINEAR_ENCODER, parcel_loss=args.parcel_loss,
-                         class_weights=class_weights, num_layers=args.num_layers)
+            model = UNet(run_path, LINEAR_ENCODER, crop_encoding=crop_encoding,
+                         parcel_loss=args.parcel_loss, class_weights=class_weights,
+                         num_layers=args.num_layers)
 
         if not args.train:
             # Load the model for testing
-            crop_encoding_rev = {v: k for k, v in CROP_ENCODING.items()}
-            crop_encoding = {k: crop_encoding_rev[k] for k in LINEAR_ENCODER.keys() if k != 0}
-            crop_encoding[0] = 'Background/Other'
-
-            model = UNet.load_from_checkpoint(resume_from_checkpoint,
-                                                  map_location=torch_device,                                                  run_path=run_path,
-                                                  linear_encoder=LINEAR_ENCODER,
-                                                  crop_encoding=crop_encoding,
-                                                  checkpoint_epoch=init_epoch)
+            model = UNet.load_from_checkpoint(resume_from_checkpoint, map_location=torch_device,
+                                              linear_encoder=LINEAR_ENCODER, crop_encoding=crop_encoding,
+                                              checkpoint_epoch=init_epoch)
     elif args.model == 'unettransformer':
         args.img_size = [int(dim) for dim in args.img_size]
 
-        results_path = create_model_log_path(log_path, prefix, args.model)
+        results_path = create_model_log_path(log_path, prefix, args)
 
         run_path, resume_from_checkpoint, max_epoch, init_epoch = \
             resume_or_start(results_path, args.resume, args.train, args.num_epochs, args.load_checkpoint)
@@ -439,13 +450,14 @@ def main():
                     if int(epoch_lr[0]) == init_epoch:
                         init_learning_rate = float(epoch_lr[1])
 
-            model = UNetTransformer(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
+            model = UNetTransformer(run_path, LINEAR_ENCODER, crop_encoding=crop_encoding,
+                                    learning_rate=init_learning_rate,
                                     parcel_loss=args.parcel_loss, class_weights=class_weights,
                                     num_layers=args.num_layers, num_heads=args.num_heads, window_len=args.window_len,
                                     mhsa = args.mhsa, mhca = args.mhca,
                                     num_bands=num_bands, img_dim=args.img_size[0])
         else:
-            model = UNetTransformer(run_path, LINEAR_ENCODER,
+            model = UNetTransformer(run_path, LINEAR_ENCODER, crop_encoding=crop_encoding,
                                     parcel_loss=args.parcel_loss, class_weights=class_weights,
                                     num_layers=args.num_layers, num_heads=args.num_heads, window_len=args.window_len,
                                     mhsa=args.mhsa, mhca=args.mhca,
@@ -453,20 +465,15 @@ def main():
 
         if not args.train:
             # Load the model for testing
-            crop_encoding_rev = {v: k for k, v in CROP_ENCODING.items()}
-            crop_encoding = {k: crop_encoding_rev[k] for k in LINEAR_ENCODER.keys() if k != 0}
-            crop_encoding[0] = 'Background/Other'
-
-            model = UNetTransformer.load_from_checkpoint(resume_from_checkpoint,
-                                              map_location=torch_device, run_path=run_path,
-                                              linear_encoder=LINEAR_ENCODER,
-                                              crop_encoding=crop_encoding,
-                                              checkpoint_epoch=init_epoch)
+            model = UNetTransformer.load_from_checkpoint(resume_from_checkpoint,  map_location=torch_device,
+                                                         run_path=run_path,
+                                                         linear_encoder=LINEAR_ENCODER, crop_encoding=crop_encoding,
+                                                         checkpoint_epoch=init_epoch)
     elif args.model == 'tempcnn':
         args.img_size = (1, 1)
         args.bands = ['B03', 'B04', 'B08']
 
-        results_path = create_model_log_path(log_path, prefix, args.model)
+        results_path = create_model_log_path(log_path, prefix, args)
 
         run_path, resume_from_checkpoint, max_epoch, init_epoch = \
             resume_or_start(results_path, args.resume, args.train, args.num_epochs, args.load_checkpoint)
@@ -501,13 +508,18 @@ def main():
     # -------------------------------------------------
     # SAVE MODEL INFORMATION TO FILE
     # Added 26Aug2022 by ST for debugging
+    if args.train:
+        model_fname = run_path / "modelinfo_train.txt"
+    else:
+        model_fname = run_path / "modelinfo_test.txt"
+
     if args.model == 'unet' or args.model == 'unettransformer':
         from torchinfo import summary
         torchinfo_modelstats = summary(model,
                                        input_size=(args.batch_size, len(args.bands)*6, args.img_size[0], args.img_size[1]),
                                        col_width=20,  col_names=["kernel_size", "input_size", "output_size", "num_params"],
                                        row_settings=["var_names"],)
-        with open(f"{run_path}/modelinfo.txt", "w", encoding="utf-8") as tf:
+        with open(f"{model_fname}", "w", encoding="utf-8") as tf:
             tf.write(str(torchinfo_modelstats))
     # -------------------------------------------------
 

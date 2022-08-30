@@ -26,6 +26,12 @@ import seaborn as sns
 from sklearn.metrics._classification import confusion_matrix # added 20220812 Steven Tuften
 from torchmetrics.functional import dice # added 20220814 Steven Tuften
 
+########################################################
+# ADDED BY ST 17AUG2022 to auto email experiment status
+from utils.email import notification as email_notification
+########################################################
+
+
 def get_last_model_checkpoint(path):
     '''
     Browses through the given path and finds the last saved checkpoint of a
@@ -116,7 +122,7 @@ class Up(nn.Module):
 class UNet(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
                  class_weights=None, crop_encoding=None, checkpoint_epoch=None,
-                 num_layers=3):
+                 num_layers=3, num_bands=4, img_dim=61, window_len=6):
         '''
         Parameters:
         -----------
@@ -141,6 +147,12 @@ class UNet(pl.LightningModule):
             The epoch loaded for testing.
         num_layers: int, default 3
             The number of layers to use in each path.
+        num_bands: int, default 4
+            The number of image bands or layers.
+        img_dim: int, default 61
+            The number of pixels in each row of the input image.
+        window_len: int, default 6
+            The length of the rolling window to be used (in months). Default 6.
         '''
         if num_layers < 1:
             raise ValueError(f"num_layers = {num_layers}, expected: num_layers > 0")
@@ -149,6 +161,7 @@ class UNet(pl.LightningModule):
 
         super(UNet, self).__init__()
 
+        self.img_dim = img_dim
         self.linear_encoder = linear_encoder
         self.parcel_loss = parcel_loss
 
@@ -162,8 +175,8 @@ class UNet(pl.LightningModule):
         self.endtime = datetime.now()
         self.duration = 0.0
 
-        num_discrete_labels = len(set(linear_encoder.values()))
-        self.confusion_matrix = np.zeros([num_discrete_labels, num_discrete_labels])  # 20220812 ST changed to np.zeros from torch.zeros
+        self.num_discrete_labels = len(set(linear_encoder.values()))
+        self.confusion_matrix = np.zeros([self.num_discrete_labels, self.num_discrete_labels])  # 20220812 ST changed to np.zeros from torch.zeros
 
         self.class_weights = class_weights
         self.checkpoint_epoch = checkpoint_epoch
@@ -181,10 +194,17 @@ class UNet(pl.LightningModule):
             else:
                 self.lossfunction = nn.NLLLoss(ignore_index=0)
 
+        # Extract label keys and values sorted by label key
         self.crop_encoding = crop_encoding
+        self.label_values = []
+        self.label_keys = []
+        for k in sorted(self.linear_encoder.keys()):
+            self.label_values.append(self.crop_encoding[k])
+            self.label_keys.append(k)
+
         self.run_path = Path(run_path)
 
-        input_channels = 4 * 6   # bands * time steps
+        input_channels = num_bands * window_len   # bands * time steps (Window lengths ie. number of rolling months)
 
         # Encoder
         # -------
@@ -195,13 +215,13 @@ class UNet(pl.LightningModule):
             layers.append(Down(feats, feats * 2))
             feats *= 2
 
-        # Dencoder
+        # Decoder
         # --------
         for _ in range(num_layers - 1):
             layers.append(Up(feats, feats // 2, False))
             feats //= 2
 
-        layers.append(nn.Conv2d(feats, num_discrete_labels, kernel_size=1))
+        layers.append(nn.Conv2d(feats, self.num_discrete_labels, kernel_size=1))
         layers.append(nn.LogSoftmax(dim=1))
 
         self.layers = nn.ModuleList(layers)
@@ -375,20 +395,15 @@ class UNet(pl.LightningModule):
             label = label.cpu().detach().flatten() # flatten after numpy conversion is faster
             pred = pred_sparse.cpu().detach().flatten() # flatten after numpy conversion is faster
 
-            # Discretize predictions
-            #bins = np.arange(-0.5, sorted(list(self.linear_encoder.values()))[-1] + 0.5, 1)
-            #bins_idx = torch.bucketize(pred, torch.tensor(bins).cuda())
-            #pred_disc = bins_idx - 1
-
         # added 20220812 Steven Tuften
         # Replace bespoke Confusion Matrix calculation with sklearn method to speed up by order of magnitude!
-        cm_delta = confusion_matrix(label, pred)
+        cm_delta = confusion_matrix(label, pred, labels=range(self.num_discrete_labels)) # include label_keys so 12x12 returned
         self.confusion_matrix = self.confusion_matrix + cm_delta
-        #for i in range(label.shape[0]):
-        #    self.confusion_matrix[label[i], pred[i]] += 1
 
         # added 20220815 Dice Score
-        step_dice_score = dice(pred, label, num_classes=12, multiclass=True, zero_division=1, average='none',ignore_index=0)
+        step_dice_score = dice(pred, label, num_classes=self.num_discrete_labels,
+                               multiclass=True, zero_division=0,
+                               average='none',ignore_index=0)
         self.dice_score.append(step_dice_score.numpy())
         return
 
@@ -409,10 +424,19 @@ class UNet(pl.LightningModule):
         with open(self.metrics_file, "a") as f:
             f.write(f'TRAIN,{self.current_epoch},'
                     f'{self.starttime.strftime("%Y-%m-%d %H:%M:%S")},{self.endtime.strftime("%Y-%m-%d %H:%M:%S")},'
-                    f'{self.duration},{self.duration.total_seconds()}s,'
+                    f'{self.duration},{self.duration.total_seconds()},'
                     f'{train_loss},{self.learning_rate}\n')
 
         self.starttime = datetime.now()
+
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: TRAINING EPOCH END
+        Epoch: {self.current_epoch}
+        Duration: {self.duration}
+        Loss: {train_loss}"""
+        email_notification("DL Experiment | TRAINING EPOCH END", messagebody)
 
     def validation_epoch_end(self, outputs):
         # Calculate average loss over an epoch
@@ -430,11 +454,19 @@ class UNet(pl.LightningModule):
         with open(self.metrics_file, "a") as f:
             f.write(f'VALIDATION,{self.current_epoch},'
                     f'{self.starttime.strftime("%Y-%m-%d %H:%M:%S")},{self.endtime.strftime("%Y-%m-%d %H:%M:%S")},'
-                    f'{self.duration},{self.duration.total_seconds()}s,'
+                    f'{self.duration},{self.duration.total_seconds()},'
                     f'{valid_loss},"N/A"\n')
 
         self.starttime = datetime.now()
 
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: VALIDATION EPOCH END
+        Epoch: {self.current_epoch}
+        Duration: {self.duration}
+        Loss: {valid_loss}"""
+        email_notification("DL Experiment | VALIDATION EPOCH END", messagebody)
 
     def test_epoch_end(self, outputs):
         self.testrun_path = Path(self.run_path / f'testrun_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
@@ -444,6 +476,7 @@ class UNet(pl.LightningModule):
         self.confusion_matrix = self.confusion_matrix[1:, 1:]  # Drop zero label
         self.dice_score = np.array(self.dice_score)
         self.dice_score = self.dice_score[:, 1:]  # Drop zero label
+        self.dice_score = np.nan_to_num(self.dice_score, nan=0.0, posinf=0.0, neginf=0.0)
 
         # Calculate metrics and confusion matrix
         fp = self.confusion_matrix.sum(axis=0) - np.diag(self.confusion_matrix)
@@ -563,7 +596,6 @@ class UNet(pl.LightningModule):
         row_mins = self.confusion_matrix.min(axis=1)
         row_maxs = self.confusion_matrix.max(axis=1)
 
-        # Reverse calculation for normalisation 20220812 Steve
         cm_norm = (self.confusion_matrix - row_mins[:, None]) / (row_maxs[:, None] - row_mins[:, None])
 
         # Export Confusion Matrix
@@ -637,3 +669,13 @@ class UNet(pl.LightningModule):
 
         np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
         pickle.dump(self.linear_encoder, open(self.testrun_path / f'linear_encoder_epoch{self.checkpoint_epoch}.pkl', 'wb'))
+
+        # Send Email Status update
+        messagebody = f"""\
+        Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        Status: TEST EPOCH END
+        Duration: {self.duration}
+        weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
+        {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
+        """
+        email_notification("DL Experiment | TEST EPOCH END", messagebody)

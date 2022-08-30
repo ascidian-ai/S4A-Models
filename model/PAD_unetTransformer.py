@@ -109,10 +109,10 @@ class MultiHeadAttention(nn.Module):
         # Scale down
         if self.embed_dim != input_dimension:  # if input doesn't match embedding dimension
             downsample = torch.nn.Upsample(size=[self.embed_dim, self.embed_dim], mode='bilinear')
-            input_tensor = downsample(query)
+            query = downsample(query)
 
         # don't flatten batch or feature dimension, only flatten the last 2 dimensions being the pixel grid
-        input_tensor = torch.flatten(input_tensor, start_dim=2, end_dim=3)
+        input_tensor = torch.flatten(query, start_dim=2, end_dim=3)
 
         # attn_output is of shape (N,L,E) where E = no of pixels in grid/image
         attn_output = self.mhsa(input_tensor, key=input_tensor, value=input_tensor)
@@ -203,7 +203,7 @@ class UNetTransformer(pl.LightningModule):
             The number of heads in the Multi Headed Attention modules.
         num_bands: int, default 4
             The number of image bands or layers.
-        img_dims: int, default 61
+        img_dim: int, default 61
             The number of pixels in each row of the input image.
         mhsa: boolean, default True
             If True, then add a Multi Headed Self Attention module between the lay Down layer and first Up layer.
@@ -247,8 +247,8 @@ class UNetTransformer(pl.LightningModule):
         self.endtime = datetime.now()
         self.duration = 0.0
 
-        num_discrete_labels = len(set(linear_encoder.values()))
-        self.confusion_matrix = np.zeros([num_discrete_labels, num_discrete_labels])  # 20220812 ST changed to np.zeros from torch.zeros
+        self.num_discrete_labels = len(set(linear_encoder.values()))
+        self.confusion_matrix = np.zeros([self.num_discrete_labels, self.num_discrete_labels])  # 20220812 ST changed to np.zeros from torch.zeros
 
         self.class_weights = class_weights
         self.checkpoint_epoch = checkpoint_epoch
@@ -266,7 +266,14 @@ class UNetTransformer(pl.LightningModule):
             else:
                 self.lossfunction = nn.NLLLoss(ignore_index=0)
 
+        # Extract label keys and values sorted by label key
         self.crop_encoding = crop_encoding
+        self.label_values = []
+        self.label_keys = []
+        for k in sorted(self.linear_encoder.keys()):
+            self.label_values.append(self.crop_encoding[k])
+            self.label_keys.append(k)
+
         self.run_path = Path(run_path)
 
         input_channels = num_bands * window_len   # bands * time steps (Window lengths ie. number of rolling months)
@@ -295,17 +302,12 @@ class UNetTransformer(pl.LightningModule):
             layers.append(MultiHeadAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
 
         # Decoder
-        # -------- # Hard code layers with embed_dim = 30 and 61
-        layers.append(Up(feats, feats // 2, False, mhca=self.mhca, embed_dim=15, num_heads=3 )) # originally embed_dim=30
-        feats //= 2
-        layers.append(Up(feats, feats // 2, False, mhca=self.mhca, embed_dim=15, num_heads=3 )) # originally embed_dim=61
-        feats //= 2
-        #for _ in range(num_layers - 1):
-        #    layers.append(Up(feats, feats // 2, False,
-        #                     mhca=self.mhca, embed_dim=30, num_heads=self.num_heads ))
-        #    feats //= 2
+        for _ in range(num_layers - 1):
+            layers.append(Up(feats, feats // 2, False,
+                             mhca=self.mhca, embed_dim=15, num_heads=3 ))
+            feats //= 2
 
-        layers.append(nn.Conv2d(feats, num_discrete_labels, kernel_size=1))
+        layers.append(nn.Conv2d(feats, self.num_discrete_labels, kernel_size=1))
         layers.append(nn.LogSoftmax(dim=1))
 
         self.layers = nn.ModuleList(layers)
@@ -338,12 +340,10 @@ class UNetTransformer(pl.LightningModule):
         # Up path
         if self.mhsa:
             for i, layer in enumerate(self.layers[(self.num_layers+1):-2]):
-                xi[-1] = layer(xi[-1], xi[-3-i]) # Skip connection from first Down layer
-                #xi[-1] = layer(xi[-1], xi[-2-(2*i)]) # Skip connection from matching Down layer
+                xi[-1] = layer(xi[-1], xi[-3-i]) # Skip connection from matching Down layer
         else:
             for i, layer in enumerate(self.layers[self.num_layers:-2]): # original from unet model
-                xi[-1] = layer(xi[-1], xi[-2-i]) # Skip connection from first Down layer
-                #xi[-1] = layer(xi[-1], xi[-1-(2*i)])  # Skip connection from matching Down layer
+                xi[-1] = layer(xi[-1], xi[-2-i]) # Skip connection from matching Down layer
 
         xi[-1] = self.layers[-2](xi[-1])
 
@@ -489,20 +489,15 @@ class UNetTransformer(pl.LightningModule):
             label = label.cpu().detach().flatten() # flatten after numpy conversion is faster
             pred = pred_sparse.cpu().detach().flatten() # flatten after numpy conversion is faster
 
-            # Discretize predictions
-            #bins = np.arange(-0.5, sorted(list(self.linear_encoder.values()))[-1] + 0.5, 1)
-            #bins_idx = torch.bucketize(pred, torch.tensor(bins).cuda())
-            #pred_disc = bins_idx - 1
-
         # added 20220812 Steven Tuften
         # Replace bespoke Confusion Matrix calculation with sklearn method to speed up by order of magnitude!
-        cm_delta = confusion_matrix(label, pred)
+        cm_delta = confusion_matrix(label, pred, labels=range(self.num_discrete_labels)) # include label_keys so 12x12 returned
         self.confusion_matrix = self.confusion_matrix + cm_delta
-        #for i in range(label.shape[0]):
-        #    self.confusion_matrix[label[i], pred[i]] += 1
 
         # added 20220815 Dice Score
-        step_dice_score = dice(pred, label, num_classes=12, multiclass=True, zero_division=1, average='none',ignore_index=0)
+        step_dice_score = dice(pred, label, num_classes=self.num_discrete_labels,
+                               multiclass=True, zero_division=0,
+                               average='none',ignore_index=0)
         self.dice_score.append(step_dice_score.numpy())
         return
 
@@ -523,7 +518,7 @@ class UNetTransformer(pl.LightningModule):
         with open(self.metrics_file, "a") as f:
             f.write(f'TRAIN,{self.current_epoch},'
                     f'{self.starttime.strftime("%Y-%m-%d %H:%M:%S")},{self.endtime.strftime("%Y-%m-%d %H:%M:%S")},'
-                    f'{self.duration},{self.duration.total_seconds()}s,'
+                    f'{self.duration},{self.duration.total_seconds()},'
                     f'{train_loss},{self.learning_rate}\n')
 
         self.starttime = datetime.now()
@@ -553,7 +548,7 @@ class UNetTransformer(pl.LightningModule):
         with open(self.metrics_file, "a") as f:
             f.write(f'VALIDATION,{self.current_epoch},'
                     f'{self.starttime.strftime("%Y-%m-%d %H:%M:%S")},{self.endtime.strftime("%Y-%m-%d %H:%M:%S")},'
-                    f'{self.duration},{self.duration.total_seconds()}s,'
+                    f'{self.duration},{self.duration.total_seconds()},'
                     f'{valid_loss},"N/A"\n')
 
         self.starttime = datetime.now()
@@ -576,6 +571,7 @@ class UNetTransformer(pl.LightningModule):
         self.confusion_matrix = self.confusion_matrix[1:, 1:]  # Drop zero label
         self.dice_score = np.array(self.dice_score)
         self.dice_score = self.dice_score[:, 1:]  # Drop zero label
+        self.dice_score = np.nan_to_num(self.dice_score, nan=0.0, posinf=0.0, neginf=0.0)
 
         # Calculate metrics and confusion matrix
         fp = self.confusion_matrix.sum(axis=0) - np.diag(self.confusion_matrix)
