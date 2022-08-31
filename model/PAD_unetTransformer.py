@@ -60,7 +60,10 @@ def get_last_model_checkpoint(path):
 
     return model_chkp_per_epoch[last_model_epoch], optimizer_chkp_per_epoch[last_model_epoch], last_model_epoch
 
-
+#######################################################################
+# DoubleConv()
+# Input Tensor shape : (B, C, H, W)
+# Output Tensor shape : (B, C, H, W)
 class DoubleConv(nn.Module):
     """[ Conv2d => BatchNorm (optional) => ReLU ] x 2."""
 
@@ -78,11 +81,15 @@ class DoubleConv(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+#######################################################################
+# SingleConv()
+# Input Tensor shape : (B, C, H, W)
+# Output Tensor shape : (B, C, H, W)
 class SingleConv(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, kernel_size=1, padding=1),
+            nn.Conv2d(in_ch, out_ch, kernel_size=1, padding=0),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
         )
@@ -90,11 +97,16 @@ class SingleConv(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+#######################################################################
+# SingleConvSigUp()
+# Input Tensor shape : (B, C, H, W)
+# Output Tensor shape : (B, C, 2*H, 2*W)
+
 class SingleConvSigUp(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, kernel_size=1, padding=1),
+            nn.Conv2d(in_ch, out_ch, kernel_size=1, padding=0),
             nn.BatchNorm2d(out_ch),
             nn.Sigmoid(),
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
@@ -164,19 +176,30 @@ class Up(nn.Module):
                  mhca: bool = False, embed_dim: int=15, num_heads: int = 1):
         super().__init__()
         self.mhca = mhca
-        self.doubleconv = DoubleConv(in_ch, out_ch)
+        self.convDouble = DoubleConv(in_ch, out_ch)
+        self.embed_dim = embed_dim
+        self.embed_len = embed_dim*embed_dim
 
         # Call Cross-Attention Module
         # ---------------------
         if self.mhca:
             #self.mhca_module = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
-            self.mhca_module = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
+            self.mhca_module = nn.MultiheadAttention( embed_dim=self.embed_len,
+                                                      kdim=4*self.embed_len,
+                                                      vdim=4*self.embed_len,
+                                                      num_heads=num_heads,
+                                                      batch_first=True)
+
+            # Input Tensor shape : (B, C, H, W)
+            # Output Tensor shape : (B, C, 2*H, 2*W)
             self.upsample2x2Conv3x3 = nn.Sequential(
                     nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-                    nn.Conv2d(in_ch, in_ch // 2, kernel_size=3),
+                    nn.Conv2d(in_ch, in_ch // 2, kernel_size=3, padding=1),
                 )
-            self.conv1x1BNReLu = SingleConv(in_ch, out_ch)
-            self.conv1x1BNSigmoidUpsample = SingleConvSigUp(in_ch, out_ch)
+
+            self.conv1x1BNReLuX1 = SingleConv(in_ch, in_ch)
+            self.conv1x1BNReLuX2 = SingleConv(out_ch, out_ch)
+            self.conv1x1BNSigmoidUpsample = SingleConvSigUp(out_ch, out_ch)
         else:
             self.upsample = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
 
@@ -184,13 +207,23 @@ class Up(nn.Module):
         if self.mhca:
             # Call Cross-Attention Module
             # ---------------------
-            Q = K = self.conv1x1BNReLu(x1)
-            V = self.conv1x1BNReLu(x2)
+            Q = self.conv1x1BNReLuX1(x1)
+            K = self.conv1x1BNReLuX1(x1)
+            K = self.upsample2x2Conv3x3(K)
+            V = self.conv1x1BNReLuX2(x2)
+
+            Q = torch.flatten(Q, start_dim=2, end_dim=3)
+            K = torch.flatten(K, start_dim=2, end_dim=3)
+            V = torch.flatten(V, start_dim=2, end_dim=3)
+
             A = self.mhca_module(query=Q, key=K, value=V)
+            channels = x2.size(dim=1)
+            A = torch.reshape(A[0], [-1, channels, self.embed_dim, self.embed_dim])
+
             Z = self.conv1x1BNSigmoidUpsample(A)
 
             x1 = self.upsample2x2Conv3x3(x1)
-            x1 = self.conv1x1BNReLu(x1)
+            x1 = self.conv1x1BNReLuX1(x1)
             x2 = torch.mul(x2,Z)
         else:
             x1 = self.upsample(x1)
@@ -203,7 +236,7 @@ class Up(nn.Module):
 
         # Concatenate along the channels axis
         x = torch.cat([x2, x1], dim=1)
-        return self.doubleconv(x)
+        return self.convDouble(x)
 
 class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
