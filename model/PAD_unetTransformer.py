@@ -125,44 +125,58 @@ class Down(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-class MultiHeadAttention(nn.Module):
+class ScaledMultiHeadAttention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
         self.num_heads = num_heads
-        self.embed_dim = embed_dim
-        self.embed_len = embed_dim * embed_dim
-        self.mhsa = nn.MultiheadAttention(embed_dim=self.embed_len, num_heads=num_heads, batch_first=True)
+        self.embed_dim = embed_dim              # The target embedding size to scale each input vector to.
+
+        # Verify Embedding dimension is evenly divisable by number of heads!
+        self.embed_len = self.embed_dim * self.embed_dim
+        self.head_dim = self.embed_len // self.num_heads
+        assert self.head_dim * self.num_heads == self.embed_len, "embed_len must be divisible by num_heads"
+
+        # Note that Q, K and V vectors should all be of the same dimension.
+        self.smhsa = nn.MultiheadAttention(embed_dim=self.embed_len, # Dimensionality of Q vector
+                                          kdim=self.embed_len,      # Dimensionality of K vector
+                                          vdim=self.embed_len,      # Dimensionality of V vector
+                                          num_heads=num_heads,
+                                          batch_first=True)
     def forward(self, query, key=None, value=None, need_weights=False):
-        # query = embedding of shape (N,L,E) for unbatched input when batch_first=True
-        # key = embedding of shape (N,S,E) for unbatched input when batch_first=True
-        # value = embedding of shape (N,S,E) for unbatched input when batch_first=True
+        if key is None: key = query
+        if value is None: value = query
+
+        # Verify batch size is the same
+        assert query.size(dim=0) == key.size(dim=0) == value.size(dim=0), "inputs must be of the same batch size"
+        batch_size = query.size(dim=0)
+
+        # Scale Matrices to same dimensions
+        output_dim = value.size(dim=2) # store output dim for later re-scaling
+        scaleinput = torch.nn.Upsample(size=[self.embed_dim, self.embed_dim], mode='bilinear')
+        if self.embed_dim != query.size(dim=2): query = scaleinput(query)
+        if self.embed_dim != key.size(dim=2): key = scaleinput(key)
+        if self.embed_dim != value.size(dim=2): value = scaleinput(value)
+
+        # Vectorise Matrices
+        # Q = embedding of shape (B,C,H*W) for unbatched input when batch_first=True
+        # K = embedding of shape (B,C,H*W) for unbatched input when batch_first=True
+        # V = embedding of shape (B,C,H*W) for unbatched input when batch_first=True
+        Q = torch.flatten(query, start_dim=2, end_dim=3)
+        K = torch.flatten(key, start_dim=2, end_dim=3)
+        V = torch.flatten(value, start_dim=2, end_dim=3)
 
         # number of features is 2nd dimension
-        batch_size = query.size(dim=0)
         channels = query.size(dim=1)
-        input_dimension = query.size(dim=2)
 
-        # Scale down
-        if self.embed_dim != input_dimension:  # if input doesn't match embedding dimension
-            downsample = torch.nn.Upsample(size=[self.embed_dim, self.embed_dim], mode='bilinear')
-            query = downsample(query)
+        # attn_output is of shape (B,C,E)
+        attn_vector = self.smhsa(Q, K, V)
 
-        # don't flatten batch or feature dimension, only flatten the last 2 dimensions being the pixel grid
-        input_tensor = torch.flatten(query, start_dim=2, end_dim=3)
-
-        if key == None: key = input_tensor
-        if value == None: value = input_tensor
-
-        # attn_output is of shape (N,L,E) where E = no of pixels in grid/image
-        attn_output = self.mhsa(input_tensor, key=key, value=value)
-
-        # reshape to original tensor shape
-        output_tensor = torch.reshape(attn_output[0], [batch_size, channels, self.embed_dim, self.embed_dim])
+        output_tensor = torch.reshape(attn_vector[0], [-1, channels, self.embed_dim, self.embed_dim])
 
         # Scale up
-        if self.embed_dim != input_dimension:  # if input doesn't match embedding dimension
-            upsample = torch.nn.Upsample(size=[input_dimension, input_dimension], mode='bilinear')
-            output_tensor = upsample(output_tensor)
+        if self.embed_dim != output_dim:  # if output dimension doesn't match embedding dimension
+            scaleoutput = torch.nn.Upsample(size=[output_dim, output_dim], mode='bilinear')
+            output_tensor = scaleoutput(output_tensor)
 
         return output_tensor
 
@@ -175,68 +189,51 @@ class Up(nn.Module):
     def __init__(self, in_ch: int, out_ch: int,
                  mhca: bool = False, embed_dim: int=15, num_heads: int = 1):
         super().__init__()
-        self.mhca = mhca
         self.convDouble = DoubleConv(in_ch, out_ch)
+
+        self.mhca = mhca
         self.embed_dim = embed_dim
-        self.embed_len = embed_dim*embed_dim
+        self.num_heads = num_heads
 
         # Call Cross-Attention Module
         # ---------------------
         if self.mhca:
-            #self.mhca_module = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
-            self.mhca_module = nn.MultiheadAttention( embed_dim=self.embed_len,
-                                                      kdim=4*self.embed_len,
-                                                      vdim=4*self.embed_len,
-                                                      num_heads=num_heads,
-                                                      batch_first=True)
-
+            self.smhca = ScaledMultiHeadAttention(embed_dim=self.embed_dim,
+                                                  num_heads=num_heads)
             # Input Tensor shape : (B, C, H, W)
             # Output Tensor shape : (B, C, 2*H, 2*W)
-            self.upsample2x2Conv3x3 = nn.Sequential(
-                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-                    nn.Conv2d(in_ch, in_ch // 2, kernel_size=3, padding=1),
-                )
+            self.conv3x3 = nn.Conv2d(out_ch, in_ch // 2, kernel_size=3, padding=1)
 
-            self.conv1x1BNReLuX1 = SingleConv(in_ch, in_ch)
-            self.conv1x1BNReLuX2 = SingleConv(out_ch, out_ch)
+            self.conv1x1BNReLuX1 = SingleConv(out_ch, out_ch) # in.in
+            self.conv1x1BNReLuX2 = SingleConv(out_ch, out_ch) #out,in
             self.conv1x1BNSigmoidUpsample = SingleConvSigUp(out_ch, out_ch)
-        else:
-            self.upsample = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
+
+        self.upsample = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
 
     def forward(self, x1, x2):
+        x1 = self.upsample(x1)
+
+        # Pad x1 to the size of x2
+        diff_h = x2.shape[2] - x1.shape[2]
+        diff_w = x2.shape[3] - x1.shape[3]
+        x1 = F.pad(x1, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
+
         if self.mhca:
             # Call Cross-Attention Module
             # ---------------------
             Q = self.conv1x1BNReLuX1(x1)
             K = self.conv1x1BNReLuX1(x1)
-            K = self.upsample2x2Conv3x3(K)
             V = self.conv1x1BNReLuX2(x2)
 
-            Q = torch.flatten(Q, start_dim=2, end_dim=3)
-            K = torch.flatten(K, start_dim=2, end_dim=3)
-            V = torch.flatten(V, start_dim=2, end_dim=3)
+            A = self.smhca(query=Q, key=K, value=V)
 
-            A = self.mhca_module(query=Q, key=K, value=V)
-            channels = x2.size(dim=1)
-            A = torch.reshape(A[0], [-1, channels, self.embed_dim, self.embed_dim])
-
-            Z = self.conv1x1BNSigmoidUpsample(A)
-
-            x1 = self.upsample2x2Conv3x3(x1)
-            x1 = self.conv1x1BNReLuX1(x1)
-            x2 = torch.mul(x2,Z)
-        else:
-            x1 = self.upsample(x1)
-
-            # Pad x1 to the size of x2
-            diff_h = x2.shape[2] - x1.shape[2]
-            diff_w = x2.shape[3] - x1.shape[3]
-
-            x1 = F.pad(x1, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
+            x1 = self.conv3x3(x1)
+            x2 = torch.mul(x2,A)
 
         # Concatenate along the channels axis
         x = torch.cat([x2, x1], dim=1)
-        return self.convDouble(x)
+        x = self.convDouble(x)
+        return x
 
 class UNetTransformer(pl.LightningModule):
     def __init__(self, run_path, linear_encoder, learning_rate=1e-3, parcel_loss=False,
@@ -349,9 +346,6 @@ class UNetTransformer(pl.LightningModule):
         layer_dim = self.img_dim
         for i in range(self.num_layers - 1): layer_dim = layer_dim // 2
         self.embed_dim = layer_dim  # dimension of pixel grid in final downsample layer
-        self.embed_len = layer_dim * layer_dim
-        self.head_dim = self.embed_len // self.num_heads
-        assert self.head_dim * self.num_heads == self.embed_len, "embed_len must be divisible by num_heads"
 
         feats = 64
 
@@ -364,14 +358,17 @@ class UNetTransformer(pl.LightningModule):
             feats *= 2
 
         if self.mhsa:
-            # Self-Attention Module
-            # ---------------------
-            layers.append(MultiHeadAttention(embed_dim=self.embed_dim, num_heads=self.num_heads))
+            # Scaled Multi Headed Self-Attention Module
+            # -----------------------------------------
+            layers.append(ScaledMultiHeadAttention(embed_dim=24,
+                                                   num_heads=8))
 
         # Decoder
         for _ in range(num_layers - 1):
-            layers.append(Up(feats, feats // 2,
-                             mhca=self.mhca, embed_dim=15, num_heads=3 ))
+            layers.append(Up(in_ch=feats, out_ch=feats // 2,
+                             mhca=self.mhca,
+                             embed_dim=24,
+                             num_heads=8 ))
             feats //= 2
 
         layers.append(nn.Conv2d(feats, self.num_discrete_labels, kernel_size=1))
