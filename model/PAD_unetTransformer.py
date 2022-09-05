@@ -220,15 +220,15 @@ class Up(nn.Module):
 
         if self.mhca:
             # Call Cross-Attention Module
-            # ---------------------
-            Q = self.conv1x1BNReLuX1(x1)
-            K = self.conv1x1BNReLuX1(x1)
-            V = self.conv1x1BNReLuX2(x2)
+            # ----------------- Scenarios -->   [1]   [2]
+            Q = self.conv1x1BNReLuX1(x2)      # x1    x2
+            K = self.conv1x1BNReLuX1(x2)      # x1    x2
+            V = self.conv1x1BNReLuX2(x1)      # x2    x1
 
             A = self.smhca(query=Q, key=K, value=V)
 
-            x1 = self.conv3x3(x1)
-            x2 = torch.mul(x2,A)
+            x1 = self.conv3x3(x2)            # x1     x2
+            x2 = torch.mul(x1,A)             # x2     x1
 
         # Concatenate along the channels axis
         x = torch.cat([x2, x1], dim=1)
@@ -360,7 +360,7 @@ class UNetTransformer(pl.LightningModule):
         if self.mhsa:
             # Scaled Multi Headed Self-Attention Module
             # -----------------------------------------
-            layers.append(ScaledMultiHeadAttention(embed_dim=24, 
+            layers.append(ScaledMultiHeadAttention(embed_dim=24,
                                                    num_heads=8))
 
         # Decoder
