@@ -360,7 +360,7 @@ class UNetTransformer(pl.LightningModule):
         if self.mhsa:
             # Scaled Multi Headed Self-Attention Module
             # -----------------------------------------
-            layers.append(ScaledMultiHeadAttention(embed_dim=24,
+            layers.append(ScaledMultiHeadAttention(embed_dim=24, 
                                                    num_heads=8))
 
         # Decoder
