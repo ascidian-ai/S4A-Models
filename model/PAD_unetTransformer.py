@@ -152,7 +152,7 @@ class ScaledMultiHeadAttention(nn.Module):
 
         # Scale Matrices to same dimensions
         output_dim = value.size(dim=2) # store output dim for later re-scaling
-        scaleinput = torch.nn.Upsample(size=[self.embed_dim, self.embed_dim], mode='bilinear')
+        scaleinput = torch.nn.Upsample(size=[self.embed_dim, self.embed_dim], mode='bilinear', align_corners=True)
         if self.embed_dim != query.size(dim=2): query = scaleinput(query)
         if self.embed_dim != key.size(dim=2): key = scaleinput(key)
         if self.embed_dim != value.size(dim=2): value = scaleinput(value)
@@ -175,7 +175,7 @@ class ScaledMultiHeadAttention(nn.Module):
 
         # Scale up
         if self.embed_dim != output_dim:  # if output dimension doesn't match embedding dimension
-            scaleoutput = torch.nn.Upsample(size=[output_dim, output_dim], mode='bilinear')
+            scaleoutput = torch.nn.Upsample(size=[output_dim, output_dim], mode='bilinear', align_corners=True)
             output_tensor = scaleoutput(output_tensor)
 
         return output_tensor
@@ -220,15 +220,15 @@ class Up(nn.Module):
 
         if self.mhca:
             # Call Cross-Attention Module
-            # ----------------- Scenarios -->   [1]   [2]
-            Q = self.conv1x1BNReLuX1(x2)      # x1    x2
-            K = self.conv1x1BNReLuX1(x2)      # x1    x2
-            V = self.conv1x1BNReLuX2(x1)      # x2    x1
+            # ------------------------------------
+            Q = self.conv1x1BNReLuX1(x1)
+            K = self.conv1x1BNReLuX1(x1)
+            V = self.conv1x1BNReLuX2(x2)
 
             A = self.smhca(query=Q, key=K, value=V)
 
-            x1 = self.conv3x3(x2)            # x1     x2
-            x2 = torch.mul(x1,A)             # x2     x1
+            x1 = self.conv3x3(x1)
+            x2 = torch.mul(x2,A)
 
         # Concatenate along the channels axis
         x = torch.cat([x2, x1], dim=1)
@@ -367,8 +367,8 @@ class UNetTransformer(pl.LightningModule):
         for _ in range(num_layers - 1):
             layers.append(Up(in_ch=feats, out_ch=feats // 2,
                              mhca=self.mhca,
-                             embed_dim=24,
-                             num_heads=8 ))
+                             embed_dim=30, #25
+                             num_heads=10 )) #5
             feats //= 2
 
         layers.append(nn.Conv2d(feats, self.num_discrete_labels, kernel_size=1))

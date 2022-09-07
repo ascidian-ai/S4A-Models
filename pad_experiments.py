@@ -331,11 +331,13 @@ def main():
 
         if args.resume is not None:
             # Restore optimizer's learning rate
-            with open(run_path / 'lrs.txt', 'r') as f:
-                for line in f:
-                    epoch_lr = line.strip().split(': ')
-                    if int(epoch_lr[0]) == init_epoch:
-                        init_learning_rate = float(epoch_lr[1])
+            metric_fname = sorted(run_path.glob('training_metrics_*.csv'))
+            with open(metric_fname[0], 'r') as f:
+                linetoextract = int((init_epoch*2)+3) #skip header line and first two results
+                for i, line in enumerate(f):
+                    if i == linetoextract:
+                        epoch_lr = line.strip().split(',')
+                        init_learning_rate = float(epoch_lr[7]) # column 7 is learning rate
 
             model = ConvLSTM(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
                              parcel_loss=args.parcel_loss, class_weights=class_weights)
@@ -370,11 +372,13 @@ def main():
 
         if args.resume is not None:
             # Restore optimizer's learning rate
-            with open(run_path / 'lrs.txt', 'r') as f:
-                for line in f:
-                    epoch_lr = line.strip().split(': ')
-                    if int(epoch_lr[0]) == init_epoch:
-                        init_learning_rate = float(epoch_lr[1])
+            metric_fname = sorted(run_path.glob('training_metrics_*.csv'))
+            with open(metric_fname[0], 'r') as f:
+                linetoextract = int((init_epoch*2)+3) #skip header line and first two results
+                for i, line in enumerate(f):
+                    if i == linetoextract:
+                        epoch_lr = line.strip().split(',')
+                        init_learning_rate = float(epoch_lr[7]) # column 7 is learning rate
 
             model = ConvSTAR(run_path, LINEAR_ENCODER, learning_rate=init_learning_rate,
                              parcel_loss=args.parcel_loss, class_weights=class_weights)
@@ -409,11 +413,13 @@ def main():
 
         if args.resume is not None:
             # Restore optimizer's learning rate
-            with open(run_path / 'lrs.txt', 'r') as f:
-                for line in f:
-                    epoch_lr = line.strip().split(': ')
-                    if int(epoch_lr[0]) == init_epoch:
-                        init_learning_rate = float(epoch_lr[1])
+            metric_fname = sorted(run_path.glob('training_metrics_*.csv'))
+            with open(metric_fname[0], 'r') as f:
+                linetoextract = int((init_epoch*2)+3) #skip header line and first two results
+                for i, line in enumerate(f):
+                    if i == linetoextract:
+                        epoch_lr = line.strip().split(',')
+                        init_learning_rate = float(epoch_lr[7]) # column 7 is learning rate
 
             model = UNet(run_path, LINEAR_ENCODER, crop_encoding=crop_encoding,
                          learning_rate=init_learning_rate,
@@ -444,11 +450,13 @@ def main():
 
         if args.resume is not None:
             # Restore optimizer's learning rate
-            with open(run_path / 'lrs.txt', 'r') as f:
-                for line in f:
-                    epoch_lr = line.strip().split(': ')
-                    if int(epoch_lr[0]) == init_epoch:
-                        init_learning_rate = float(epoch_lr[1])
+            metric_fname = sorted(run_path.glob('training_metrics_*.csv'))
+            with open(metric_fname[0], 'r') as f:
+                linetoextract = int((init_epoch*2)+3) #skip header line and first two results
+                for i, line in enumerate(f):
+                    if i == linetoextract:
+                        epoch_lr = line.strip().split(',')
+                        init_learning_rate = float(epoch_lr[7]) # column 7 is learning rate
 
             model = UNetTransformer(run_path, LINEAR_ENCODER, crop_encoding=crop_encoding,
                                     learning_rate=init_learning_rate,
