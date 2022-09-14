@@ -436,7 +436,10 @@ class UNet(pl.LightningModule):
         Epoch: {self.current_epoch}
         Duration: {self.duration}
         Loss: {train_loss}"""
-        email_notification("DL Experiment | TRAINING EPOCH END", messagebody)
+        try:
+            email_notification("DL Experiment | TRAINING EPOCH END", messagebody)
+        except:
+            print("SMTP Server connection interrupted")
 
     def validation_epoch_end(self, outputs):
         # Calculate average loss over an epoch
@@ -466,7 +469,10 @@ class UNet(pl.LightningModule):
         Epoch: {self.current_epoch}
         Duration: {self.duration}
         Loss: {valid_loss}"""
-        email_notification("DL Experiment | VALIDATION EPOCH END", messagebody)
+        try:
+            email_notification("DL Experiment | VALIDATION EPOCH END", messagebody)
+        except:
+            print("SMTP Server connection interrupted")
 
     def test_epoch_end(self, outputs):
         self.testrun_path = Path(self.run_path / f'testrun_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
@@ -525,6 +531,12 @@ class UNet(pl.LightningModule):
             for k in sorted(self.linear_encoder.keys()):
                 if k == 0: continue
                 row += f',{k} ({self.crop_encoding[k]})'
+            f.write(row + '\n')
+
+            class_samples = self.confusion_matrix.sum(axis=1)
+            row = "class samples"
+            for i in class_samples:
+                row += f',{i:.4f}'
             f.write(row + '\n')
 
             row = 'tn'
@@ -678,4 +690,7 @@ class UNet(pl.LightningModule):
         weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
         {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
         """
-        email_notification("DL Experiment | TEST EPOCH END", messagebody)
+        try:
+            email_notification("DL Experiment | TEST EPOCH END", messagebody)
+        except:
+            print("SMTP Server connection interrupted")

@@ -221,7 +221,10 @@ def main():
     messagebody = f"""\
     Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     Status: STARTED """
-    email_notification("DL Experiment | STARTED", messagebody)
+    try:
+        email_notification("DL Experiment | STARTED", messagebody)
+    except:
+        print("SMTP Server connection interrupted")
 
     print("-"*80,"\nSETUP MODEL & PROCESS ARGUMENTS")
     print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -539,7 +542,11 @@ def main():
     messagebody = f"""\
     Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     Status: TRAINING PHASE STARTED """
-    email_notification("DL Experiment | TRAINING STARTED", messagebody)
+    try:
+        email_notification("DL Experiment | TRAINING STARTED", messagebody)
+    except:
+        print("SMTP Server connection interrupted")
+
 
     tb_logger = pl_loggers.TensorBoardLogger(run_path / 'tensorboard')
 
@@ -640,7 +647,10 @@ def main():
         messagebody = f"""\
         Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         Status: TEST PHASE STARTED """
-        email_notification("DL Experiment | TESTING STARTED", messagebody)
+        try:
+            email_notification("DL Experiment | TESTING STARTED", messagebody)
+        except:
+            print("SMTP Server connection interrupted")
 
         # TRAINING
         trainer = pl.Trainer(gpus=args.num_gpus,
@@ -672,7 +682,10 @@ def main():
     messagebody = f"""\
     Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     Status: COMPLETED """
-    email_notification("DL Experiment | COMPLETE", messagebody)
+    try:
+        email_notification("DL Experiment | COMPLETE", messagebody)
+    except:
+        print("SMTP Server connection interrupted")
 
 if __name__ == '__main__':
     main()

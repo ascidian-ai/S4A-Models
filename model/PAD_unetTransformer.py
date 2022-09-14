@@ -141,7 +141,8 @@ class ScaledMultiHeadAttention(nn.Module):
                                           kdim=self.embed_len,      # Dimensionality of K vector
                                           vdim=self.embed_len,      # Dimensionality of V vector
                                           num_heads=num_heads,
-                                          batch_first=True)
+                                          batch_first=True,
+                                          dropout=0.2)
     def forward(self, query, key=None, value=None, need_weights=False):
         if key is None: key = query
         if value is None: value = query
@@ -367,8 +368,8 @@ class UNetTransformer(pl.LightningModule):
         for _ in range(num_layers - 1):
             layers.append(Up(in_ch=feats, out_ch=feats // 2,
                              mhca=self.mhca,
-                             embed_dim=30, #25
-                             num_heads=10 )) #5
+                             embed_dim=30,
+                             num_heads=10 ))
             feats //= 2
 
         layers.append(nn.Conv2d(feats, self.num_discrete_labels, kernel_size=1))
@@ -594,7 +595,11 @@ class UNetTransformer(pl.LightningModule):
         Epoch: {self.current_epoch}
         Duration: {self.duration}
         Loss: {train_loss}"""
-        email_notification("DL Experiment | TRAINING EPOCH END", messagebody)
+
+        try:
+            email_notification("DL Experiment | TRAINING EPOCH END", messagebody)
+        except:
+            print("SMTP Server connection interrupted")
 
     def validation_epoch_end(self, outputs):
         # Calculate average loss over an epoch
@@ -624,7 +629,10 @@ class UNetTransformer(pl.LightningModule):
         Epoch: {self.current_epoch}
         Duration: {self.duration}
         Loss: {valid_loss}"""
-        email_notification("DL Experiment | VALIDATION EPOCH END", messagebody)
+        try:
+            email_notification("DL Experiment | VALIDATION EPOCH END", messagebody)
+        except:
+            print("SMTP Server connection interrupted")
 
 
     def test_epoch_end(self, outputs):
@@ -686,6 +694,18 @@ class UNetTransformer(pl.LightningModule):
                 row += f',{k} ({self.crop_encoding[k]})'
             f.write(row + '\n')
 
+            class_samples = self.confusion_matrix.sum(axis=1)
+            row = "class samples"
+            for i in class_samples:
+                row += f',{i:.4f}'
+            f.write(row + '\n')
+
+            dice_score_avg = np.average(self.dice_score, axis=0)
+            row = "dice score"
+            for i in dice_score_avg:
+                row += f',{i:.4f}'
+            f.write(row + '\n')
+
             row = 'tn'
             for i in tn:
                 row += f',{i}'
@@ -731,24 +751,16 @@ class UNetTransformer(pl.LightningModule):
                 row += f',{i:.4f}'
             f.write(row + '\n')
 
-            dice_score_avg = np.average(self.dice_score, axis=0)
-            row = "dice score"
-            for i in dice_score_avg:
-                row += f',{i:.4f}'
-            f.write(row + '\n')
 
             f.write('\nWEIGHTED METRICS\n')
             row = 'weighted accuracy,weighted macro-f1,weighted precision,weighted dice score'
             f.write(row + '\n')
 
-            class_samples = self.confusion_matrix.sum(axis=1)
             weighted_acc = ((accuracy * class_samples) / class_samples.sum()).sum()
             weighted_f1 = ((f1 * class_samples) / class_samples.sum()).sum()
             weighted_ppv = ((ppv * class_samples) / class_samples.sum()).sum()
             weighted_dice = ((dice_score_avg * class_samples) / class_samples.sum()).sum()
             f.write(f'{weighted_acc:.4f},{weighted_f1:.4f},{weighted_ppv:.4f},{weighted_dice:.4f}\n')
-
-
 
         # Normalize each row of the confusion matrix because class imbalance is
         # high and visualization is difficult
@@ -839,4 +851,8 @@ class UNetTransformer(pl.LightningModule):
         weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
         {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
         """
-        email_notification("DL Experiment | TEST EPOCH END", messagebody)
+
+        try:
+            email_notification("DL Experiment | TEST EPOCH END", messagebody)
+        except:
+            print("SMTP Server connection interrupted")
