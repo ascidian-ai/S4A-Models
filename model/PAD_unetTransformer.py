@@ -523,6 +523,29 @@ class UNetTransformer(pl.LightningModule):
 
         return {'val_loss': loss}
 
+    def DumpImages(self, batch, batch_predictions, batch_idx, dice_score):
+        batch_inputs = batch['medians']  # (B, T, C, H, W)
+        batch_labels = batch['labels'].to(torch.long)  # (B, H, W)
+        dice_score = np.nan_to_num(np.array(dice_score), nan=0.0, posinf=0.0, neginf=0.0)
+        dice_score_avg = np.average(dice_score, axis=0)
+        dice_score_sum = np.sum(dice_score, axis=0)
+        if dice_score_avg < 0.05 or dice_score_avg > 0.30:
+            self.testrun_path = Path(self.run_path / f'tile_images')
+            self.testrun_path.mkdir(exist_ok=True, parents=True)
+
+            print(f" | Dice Score(Avg): {dice_score_avg:.4f}  Dice Score(Sum): {dice_score_sum:.4f}")
+            # Create plot
+            fig, ax = plt.subplots(1, 1, figsize=(6, 36))
+
+            # Labels, title and ticks
+            ax.xaxis.set_ticks_position('none')
+            ax.yaxis.set_ticks_position('none')
+            title_font = {'size': '21'}
+            ax.set_title(f'Tile Patches for Test Batch {batch_idx}', fontdict=title_font)
+
+            plt.savefig(self.testrun_path / f'batch_{batch_idx}_tiles.png',
+                        dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        return
 
     def test_step(self, batch, batch_idx):
         inputs = batch['medians']  # (B, T, C, H, W)
@@ -552,7 +575,8 @@ class UNetTransformer(pl.LightningModule):
             pred_sparse = pred.argmax(axis=1)
 
             label = label.cpu().detach().flatten() # flatten after numpy conversion is faster
-            pred = pred_sparse.cpu().detach().flatten() # flatten after numpy conversion is faster
+            prediction = pred_sparse.cpu()  #.detach().flatten() # flatten after numpy conversion is faster
+            pred = prediction.detach().flatten() # flatten after numpy conversion is faster
 
         # added 20220812 Steven Tuften
         # Replace bespoke Confusion Matrix calculation with sklearn method to speed up by order of magnitude!
@@ -564,6 +588,9 @@ class UNetTransformer(pl.LightningModule):
                                multiclass=True, zero_division=0,
                                average='none',ignore_index=0)
         self.dice_score.append(step_dice_score.numpy())
+
+        self.DumpImages(batch=batch, batch_predictions=prediction, batch_idx=batch_idx, dice_score=step_dice_score)
+
         return
 
 
