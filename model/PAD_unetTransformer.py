@@ -523,17 +523,17 @@ class UNetTransformer(pl.LightningModule):
 
         return {'val_loss': loss}
 
-    def DumpImages(self, batch, batch_predictions, batch_idx, dice_score):
+    def DumpImages(self, batch, batch_predictions, batch_idx, dice_score, dice_threshold=[0.05,0.30]):
         batch_inputs = batch['medians']  # (B, T, C, H, W)
         batch_labels = batch['labels'].to(torch.long)  # (B, H, W)
+
         dice_score = np.nan_to_num(np.array(dice_score), nan=0.0, posinf=0.0, neginf=0.0)
         dice_score_avg = np.average(dice_score, axis=0)
-        dice_score_sum = np.sum(dice_score, axis=0)
-        if dice_score_avg < 0.05 or dice_score_avg > 0.30:
+        if dice_score_avg < dice_threshold[0] or dice_score_avg > dice_threshold[1]:
             self.testrun_path = Path(self.run_path / f'tile_images')
             self.testrun_path.mkdir(exist_ok=True, parents=True)
 
-            print(f" | Dice Score(Avg): {dice_score_avg:.4f}  Dice Score(Sum): {dice_score_sum:.4f}")
+            print(f" | Dice Score(Avg): {dice_score_avg:.4f}")
             # Create plot
             fig, ax = plt.subplots(1, 1, figsize=(6, 36))
 
