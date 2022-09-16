@@ -523,28 +523,87 @@ class UNetTransformer(pl.LightningModule):
 
         return {'val_loss': loss}
 
-    def DumpImages(self, batch, batch_predictions, batch_idx, dice_score, dice_threshold=[0.05,0.30]):
-        batch_inputs = batch['medians']  # (B, T, C, H, W)
-        batch_labels = batch['labels'].to(torch.long)  # (B, H, W)
+    def convertPatchesToTiles(self, patches, tile_dim = 366):
+        # patches are of shape (B,H,W)
+        patches = patches.cpu().detach().numpy()
+        patch_dim = patches.shape[-1]  # Get patch width
+        num_tiles = patches.size // (tile_dim * tile_dim)
 
+        tiles = np.empty(shape=(0, tile_dim, tile_dim))
+        for t in range(num_tiles):
+            f_dim = (tile_dim // patch_dim)
+            f_dim_sq = f_dim * f_dim
+            batch_tile = patches[(f_dim_sq * t):(f_dim_sq * (t + 1))]
+
+            batch_re = batch_tile.swapaxes(0, 1)
+            batch_re = batch_re.reshape(tile_dim, tile_dim)
+
+            tile = np.empty(shape=(0, tile_dim))
+            for i in range(0, f_dim):
+                for j in range(0, patch_dim):
+                    tile = np.vstack((tile, batch_re[i + f_dim * j]))
+
+            tiles = np.vstack((tiles, [tile]))
+        return tiles
+
+    def DumpImages(self, batch, batch_predictions, batch_idx, dice_score):
         dice_score = np.nan_to_num(np.array(dice_score), nan=0.0, posinf=0.0, neginf=0.0)
         dice_score_avg = np.average(dice_score, axis=0)
-        if dice_score_avg < dice_threshold[0] or dice_score_avg > dice_threshold[1]:
+
+        #if batch_idx <= 5: # Use this to Test
+        if dice_score_avg > 0.2:
+            print(f" | Dice Score(Avg): {dice_score_avg:.4f}")
+            batch_inputs = batch['medians'].cpu().detach()  # (B, T, C, H, W)
+            batch_labels = batch['labels'].to(torch.long).cpu().detach()  # (B, H, W)
+            batch_preds = batch_predictions.to(torch.long).cpu().detach()  # (B, H, W)
+            b, t, c, h, w = batch_inputs.size()
+
+            # Create plot
             self.testrun_path = Path(self.run_path / f'tile_images')
             self.testrun_path.mkdir(exist_ok=True, parents=True)
 
-            print(f" | Dice Score(Avg): {dice_score_avg:.4f}")
-            # Create plot
-            fig, ax = plt.subplots(1, 1, figsize=(6, 36))
+            # Generate Tiles for Ground Truth
+            tiles = self.convertPatchesToTiles( batch_labels, tile_dim=366)
+            preds = self.convertPatchesToTiles( batch_preds, tile_dim=366)
 
-            # Labels, title and ticks
-            ax.xaxis.set_ticks_position('none')
-            ax.yaxis.set_ticks_position('none')
-            title_font = {'size': '21'}
-            ax.set_title(f'Tile Patches for Test Batch {batch_idx}', fontdict=title_font)
+            # convert RGB components of (B, T, C, H, W) to grayscale (B, H, W)
+            #batchred = batch_inputs
+            #rgbs = self.convertPatchesToTiles(batchred, tile_dim=366)
+
+            num_tiles = len(tiles)
+
+            fig, axs = plt.subplots(nrows=num_tiles, ncols=3, figsize=(12, 12))
+            fig.suptitle(f'Batch #{batch_idx+1}\nDice Score (Avg) = {dice_score_avg:0.3f}', fontdict={'size': '14'})
+            plt.setp(axs.flat, xticks=[], yticks=[])
+
+            plottitle_font = {'size': '10'}
+
+            if num_tiles > 1:
+                for i in range(num_tiles):
+                    tile = tiles[i, :, :]
+                    pred = preds[i, :, :]
+                    #rgb =  rgbs[i, :, :]
+                    #axs[i,0].imshow(rgb, cmap="gray")
+                    axs[i,1].imshow(tile, cmap="Paired")
+                    axs[i,2].imshow(pred, cmap="Paired")
+                    axs[i, 0].set_title(f'Tile #{i+1}\nRGB', fontdict=plottitle_font)
+                    axs[i, 1].set_title(f'Tile #{i+1}\nGround Truth', fontdict=plottitle_font)
+                    axs[i, 2].set_title(f'Tile #{i+1}\nPrediction', fontdict=plottitle_font)
+            else:
+                tile = tiles[0, :, :]
+                pred = preds[0, :, :]
+                #rgb =  rgbs[0, :, :]
+                #axs[0].imshow(rgb, cmap="gray")
+                axs[1].imshow(tile, cmap="Paired")
+                axs[2].imshow(pred, cmap="Paired")
+                axs[0].set_title(f'RGB', fontdict=plottitle_font)
+                axs[1].set_title(f'Ground Truth', fontdict=plottitle_font)
+                axs[2].set_title(f'Prediction', fontdict=plottitle_font)
 
             plt.savefig(self.testrun_path / f'batch_{batch_idx}_tiles.png',
                         dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+            plt.close(fig)
+
         return
 
     def test_step(self, batch, batch_idx):
