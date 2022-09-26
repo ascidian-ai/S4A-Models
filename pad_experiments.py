@@ -436,6 +436,7 @@ def main():
         if not args.train:
             # Load the model for testing
             model = UNet.load_from_checkpoint(resume_from_checkpoint, map_location=torch_device,
+                                              run_path=run_path,
                                               linear_encoder=LINEAR_ENCODER, crop_encoding=crop_encoding,
                                               checkpoint_epoch=init_epoch)
     elif args.model == 'unettransformer':

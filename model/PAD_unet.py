@@ -393,7 +393,8 @@ class UNet(pl.LightningModule):
             pred_sparse = pred.argmax(axis=1)
 
             label = label.cpu().detach().flatten() # flatten after numpy conversion is faster
-            pred = pred_sparse.cpu().detach().flatten() # flatten after numpy conversion is faster
+            prediction = pred_sparse.cpu()  #.detach().flatten() # flatten after numpy conversion is faster
+            pred = prediction.detach().flatten() # flatten after numpy conversion is faster
 
         # added 20220812 Steven Tuften
         # Replace bespoke Confusion Matrix calculation with sklearn method to speed up by order of magnitude!
@@ -405,6 +406,9 @@ class UNet(pl.LightningModule):
                                multiclass=True, zero_division=0,
                                average='none',ignore_index=0)
         self.dice_score.append(step_dice_score.numpy())
+
+        self.DumpImages(batch=batch, batch_predictions=prediction, batch_idx=batch_idx, dice_score=step_dice_score)
+
         return
 
 
