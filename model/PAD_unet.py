@@ -601,23 +601,60 @@ class UNet(pl.LightningModule):
             weighted_dice = ((dice_score_avg * class_samples) / class_samples.sum()).sum()
             f.write(f'{weighted_acc:.4f},{weighted_f1:.4f},{weighted_ppv:.4f},{weighted_dice:.4f}\n')
 
-
-
         # Normalize each row of the confusion matrix because class imbalance is
         # high and visualization is difficult
         row_mins = self.confusion_matrix.min(axis=1)
         row_maxs = self.confusion_matrix.max(axis=1)
+        cm_norm =  (self.confusion_matrix - row_mins[:, None]) / (row_maxs[:, None] - row_mins[:, None])
+        cm_norm = np.nan_to_num(cm_norm, nan=0.0, posinf=0.0, neginf=0.0) # Replace invalid values with 0
 
-        cm_norm = (self.confusion_matrix - row_mins[:, None]) / (row_maxs[:, None] - row_mins[:, None])
+        # Convert CM to show % of ground truth assigned to each prediction
+        row_totals = self.confusion_matrix.sum(axis=1)
+        cm_pct = self.confusion_matrix / row_totals[:, None]
+        cm_pct = np.nan_to_num(cm_pct, nan=0.0, posinf=0.0, neginf=0.0) # Replace invalid values with 0
 
         # Export Confusion Matrix
-
         # Replace invalid values with 0
         self.confusion_matrix = np.nan_to_num(self.confusion_matrix, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Create plot
+        # Create plot of Percentage Confusion Matrix
+        fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+        sns.heatmap(cm_pct, annot=True, ax=ax, cmap="Blues", fmt=".1%", annot_kws={'fontsize': 12, 'weight': 'bold'}, cbar=False)
+
+        # Labels, title and ticks
+        label_font = {'size': '24'}
+        ax.set_xlabel('Predicted labels', fontdict=label_font, labelpad=10)
+        ax.set_ylabel('Observed labels', fontdict=label_font, labelpad=10)
+
+        ax.set_xticks(list(np.arange(0.5, len(self.linear_encoder.keys()) - 1 + 0.5)))
+        ax.set_yticks(list(np.arange(0.5, len(self.linear_encoder.keys()) - 1 + 0.5)))
+
+        ax.xaxis.set_ticks_position('none')
+        ax.yaxis.set_ticks_position('none')
+
+        ax.set_xticklabels([f'{self.crop_encoding[k]} ({k})' for k in sorted(self.linear_encoder.keys()) if k != 0],
+                           fontsize=14, rotation=45, ha='right', rotation_mode='anchor') # rotation='vertical'
+        ax.set_yticklabels([f'{self.crop_encoding[k]} ({k})' for k in sorted(self.linear_encoder.keys()) if k != 0],
+                           fontsize=14, rotation='horizontal')
+
+        ax.tick_params(axis='both', which='major')
+
+        title_font = {'size': '21'}
+        ax.set_title('Normalised Confusion Matrix\n(by observed class)\n', fontdict=title_font)
+
+        # For Percent CM
+        for i in range(len(LINEAR_ENCODER.keys())):
+            ax.axhline(i, color="white", lw=2)
+
+        for i in range(len(LINEAR_ENCODER.keys()) - 1):
+            ax.add_patch(Rectangle((i + 0.02, i + 0.04), 0.96, 0.92, fill=False, edgecolor='red', lw=4))
+
+        plt.savefig(self.testrun_path / f'cm_pct_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        np.save(self.testrun_path / f'cm_pct_epoch{self.checkpoint_epoch}.npy', cm_pct)
+
+        # Create plot of Confusion Matrix
         fig, ax = plt.subplots(1, 1, figsize=(7, 7))
-        sns.heatmap(self.confusion_matrix, annot=False, ax=ax, cmap="Blues", fmt="g")
+        sns.heatmap(self.confusion_matrix, annot=False, ax=ax, cmap="Blues", fmt="g", annot_kws={'fontsize': 6})
 
         # Labels, title and ticks
         label_font = {'size': '18'}
@@ -641,19 +678,15 @@ class UNet(pl.LightningModule):
         for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=2))
 
-        plt.savefig(self.testrun_path / f'confusion_matrix_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
-
+        plt.savefig(self.testrun_path / f'cm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
         np.save(self.testrun_path / f'cm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
 
 
-        # Export normalized Confusion Matrix
-
-        # Replace invalid values with 0
-        cm_norm = np.nan_to_num(cm_norm, nan=0.0, posinf=0.0, neginf=0.0)
+        # Create plot of Normalised Confusion Matrix
 
         # Create plot
         fig, ax = plt.subplots(1, 1, figsize=(7, 7))
-        sns.heatmap(cm_norm, annot=False, ax=ax, cmap="Blues", fmt="g")
+        sns.heatmap(cm_norm, annot=False, ax=ax, cmap="Blues", fmt=".1%", annot_kws={'fontsize': 6})
 
         # Labels, title and ticks
         label_font = {'size': '18'}
@@ -677,9 +710,10 @@ class UNet(pl.LightningModule):
         for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=2))
 
-        plt.savefig(self.testrun_path / f'confusion_matrix_norm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        plt.savefig(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', cm_norm)
 
-        np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
+        # Save Linear Encoder
         pickle.dump(self.linear_encoder, open(self.testrun_path / f'linear_encoder_epoch{self.checkpoint_epoch}.pkl', 'wb'))
 
         # Send Email Status update
@@ -687,9 +721,12 @@ class UNet(pl.LightningModule):
         Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         Status: TEST EPOCH END
         Duration: {self.duration}
+        Model: {self.model_desc}
+        Number of Heads: {self.num_heads}
         weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
         {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
         """
+
         try:
             email_notification("DL Experiment | TEST EPOCH END", messagebody)
         except:

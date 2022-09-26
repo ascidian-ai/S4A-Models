@@ -21,6 +21,7 @@ import torch.optim as optim
 import pytorch_lightning as pl
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
@@ -339,6 +340,8 @@ class UNetTransformer(pl.LightningModule):
             self.label_values.append(self.crop_encoding[k])
             self.label_keys.append(k)
 
+        self.label_dict = {i: key for i, key in enumerate(self.label_values)}
+
         self.run_path = Path(run_path)
 
         input_channels = num_bands * window_len   # bands * time steps (Window lengths ie. number of rolling months)
@@ -572,36 +575,35 @@ class UNetTransformer(pl.LightningModule):
 
             num_tiles = len(tiles)
 
-            fig, axs = plt.subplots(nrows=num_tiles, ncols=3, figsize=(12, 12))
-            fig.suptitle(f'Batch #{batch_idx+1}\nDice Score (Avg) = {dice_score_avg:0.3f}', fontdict={'size': '14'})
+            fig, axs = plt.subplots(nrows=num_tiles, ncols=2, figsize=(12, 12))
+            fig.suptitle(f'Batch #{batch_idx+1}\nDice Score (Avg) = {dice_score_avg:0.3f}', fontsize=18)
             plt.setp(axs.flat, xticks=[], yticks=[])
 
-            plottitle_font = {'size': '10'}
+            plottitle_font = {'size': '14'}
+            cmap = "Paired"
 
             if num_tiles > 1:
                 for i in range(num_tiles):
                     tile = tiles[i, :, :]
                     pred = preds[i, :, :]
-                    #rgb =  rgbs[i, :, :]
-                    #axs[i,0].imshow(rgb, cmap="gray")
-                    axs[i,1].imshow(tile, cmap="Paired")
-                    axs[i,2].imshow(pred, cmap="Paired")
-                    axs[i, 0].set_title(f'Tile #{i+1}\nRGB', fontdict=plottitle_font)
-                    axs[i, 1].set_title(f'Tile #{i+1}\nGround Truth', fontdict=plottitle_font)
-                    axs[i, 2].set_title(f'Tile #{i+1}\nPrediction', fontdict=plottitle_font)
+                    axs[i,0].imshow(tile, cmap=cmap)
+                    im = axs[i,1].imshow(pred, cmap=cmap)
+                    axs[i, 0].set_title(f'Tile #{i+1}\nGround Truth', fontdict=plottitle_font)
+                    axs[i, 1].set_title(f'Tile #{i+1}\nPrediction', fontdict=plottitle_font)
             else:
                 tile = tiles[0, :, :]
                 pred = preds[0, :, :]
-                #rgb =  rgbs[0, :, :]
-                #axs[0].imshow(rgb, cmap="gray")
-                axs[1].imshow(tile, cmap="Paired")
-                axs[2].imshow(pred, cmap="Paired")
-                axs[0].set_title(f'RGB', fontdict=plottitle_font)
-                axs[1].set_title(f'Ground Truth', fontdict=plottitle_font)
-                axs[2].set_title(f'Prediction', fontdict=plottitle_font)
+                axs[0].imshow(tile, cmap=cmap)
+                im = axs[1].imshow(pred, cmap=cmap)
+                axs[0].set_title(f'Ground Truth', fontdict=plottitle_font)
+                axs[1].set_title(f'Prediction', fontdict=plottitle_font)
 
-            plt.savefig(self.testrun_path / f'batch_{batch_idx}_tiles.png',
-                        dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+            ## create patches as legend
+            colors = [im.cmap(im.norm(label)) for label in self.label_dict]
+            patches = [mpatches.Patch(color=colors[i], label=self.label_dict[i]) for i in range(len(self.label_dict))]
+            plt.legend(handles=patches, loc='center left', bbox_to_anchor=(1.1, 0.5))
+            fig.tight_layout()
+            fig.savefig(self.testrun_path / f'batch_{batch_idx}_tiles.png', dpi=fig.dpi)
             plt.close(fig)
 
         return
@@ -852,17 +854,56 @@ class UNetTransformer(pl.LightningModule):
         # high and visualization is difficult
         row_mins = self.confusion_matrix.min(axis=1)
         row_maxs = self.confusion_matrix.max(axis=1)
-
         cm_norm =  (self.confusion_matrix - row_mins[:, None]) / (row_maxs[:, None] - row_mins[:, None])
+        cm_norm = np.nan_to_num(cm_norm, nan=0.0, posinf=0.0, neginf=0.0) # Replace invalid values with 0
+
+        # Convert CM to show % of ground truth assigned to each prediction
+        row_totals = self.confusion_matrix.sum(axis=1)
+        cm_pct = self.confusion_matrix / row_totals[:, None]
+        cm_pct = np.nan_to_num(cm_pct, nan=0.0, posinf=0.0, neginf=0.0) # Replace invalid values with 0
 
         # Export Confusion Matrix
-
         # Replace invalid values with 0
         self.confusion_matrix = np.nan_to_num(self.confusion_matrix, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Create plot
+        # Create plot of Percentage Confusion Matrix
+        fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+        sns.heatmap(cm_pct, annot=True, ax=ax, cmap="Blues", fmt=".1%", annot_kws={'fontsize': 12, 'weight': 'bold'}, cbar=False)
+
+        # Labels, title and ticks
+        label_font = {'size': '24'}
+        ax.set_xlabel('Predicted labels', fontdict=label_font, labelpad=10)
+        ax.set_ylabel('Observed labels', fontdict=label_font, labelpad=10)
+
+        ax.set_xticks(list(np.arange(0.5, len(self.linear_encoder.keys()) - 1 + 0.5)))
+        ax.set_yticks(list(np.arange(0.5, len(self.linear_encoder.keys()) - 1 + 0.5)))
+
+        ax.xaxis.set_ticks_position('none')
+        ax.yaxis.set_ticks_position('none')
+
+        ax.set_xticklabels([f'{self.crop_encoding[k]} ({k})' for k in sorted(self.linear_encoder.keys()) if k != 0],
+                           fontsize=14, rotation=45, ha='right', rotation_mode='anchor') # rotation='vertical'
+        ax.set_yticklabels([f'{self.crop_encoding[k]} ({k})' for k in sorted(self.linear_encoder.keys()) if k != 0],
+                           fontsize=14, rotation='horizontal')
+
+        ax.tick_params(axis='both', which='major')
+
+        title_font = {'size': '21'}
+        ax.set_title('Normalised Confusion Matrix\n(by observed class)\n', fontdict=title_font)
+
+        # For Percent CM
+        for i in range(len(LINEAR_ENCODER.keys())):
+            ax.axhline(i, color="white", lw=2)
+
+        for i in range(len(LINEAR_ENCODER.keys()) - 1):
+            ax.add_patch(Rectangle((i + 0.02, i + 0.04), 0.96, 0.92, fill=False, edgecolor='red', lw=4))
+
+        plt.savefig(self.testrun_path / f'cm_pct_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        np.save(self.testrun_path / f'cm_pct_epoch{self.checkpoint_epoch}.npy', cm_pct)
+
+        # Create plot of Confusion Matrix
         fig, ax = plt.subplots(1, 1, figsize=(7, 7))
-        sns.heatmap(self.confusion_matrix, annot=False, ax=ax, cmap="Blues", fmt="g")
+        sns.heatmap(self.confusion_matrix, annot=False, ax=ax, cmap="Blues", fmt="g", annot_kws={'fontsize': 6})
 
         # Labels, title and ticks
         label_font = {'size': '18'}
@@ -886,19 +927,15 @@ class UNetTransformer(pl.LightningModule):
         for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=2))
 
-        plt.savefig(self.testrun_path / f'confusion_matrix_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
-
+        plt.savefig(self.testrun_path / f'cm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
         np.save(self.testrun_path / f'cm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
 
 
-        # Export normalized Confusion Matrix
-
-        # Replace invalid values with 0
-        cm_norm = np.nan_to_num(cm_norm, nan=0.0, posinf=0.0, neginf=0.0)
+        # Create plot of Normalised Confusion Matrix
 
         # Create plot
         fig, ax = plt.subplots(1, 1, figsize=(7, 7))
-        sns.heatmap(cm_norm, annot=False, ax=ax, cmap="Blues", fmt="g")
+        sns.heatmap(cm_norm, annot=False, ax=ax, cmap="Blues", fmt=".1%", annot_kws={'fontsize': 6})
 
         # Labels, title and ticks
         label_font = {'size': '18'}
@@ -922,9 +959,10 @@ class UNetTransformer(pl.LightningModule):
         for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i, i), 1, 1, fill=False, edgecolor='red', lw=2))
 
-        plt.savefig(self.testrun_path / f'confusion_matrix_norm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        plt.savefig(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
+        np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', cm_norm)
 
-        np.save(self.testrun_path / f'cm_norm_epoch{self.checkpoint_epoch}.npy', self.confusion_matrix)
+        # Save Linear Encoder
         pickle.dump(self.linear_encoder, open(self.testrun_path / f'linear_encoder_epoch{self.checkpoint_epoch}.pkl', 'wb'))
 
         # Send Email Status update
