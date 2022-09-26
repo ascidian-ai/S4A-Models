@@ -202,6 +202,8 @@ class UNet(pl.LightningModule):
             self.label_values.append(self.crop_encoding[k])
             self.label_keys.append(k)
 
+        self.label_dict = {i: key for i, key in enumerate(self.label_values)}
+
         self.run_path = Path(run_path)
 
         input_channels = num_bands * window_len   # bands * time steps (Window lengths ie. number of rolling months)
