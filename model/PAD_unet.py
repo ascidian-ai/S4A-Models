@@ -20,6 +20,7 @@ import torch.optim as optim
 import pytorch_lightning as pl
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from matplotlib.patches import Rectangle
 import seaborn as sns
 
@@ -808,7 +809,6 @@ class UNet(pl.LightningModule):
         Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         Status: TEST EPOCH END
         Duration: {self.duration}
-        Model: {self.model_desc}
         Number of Heads: {self.num_heads}
         weighted accuracy | weighted macro-f1 | weighted precision | weighted dice score
         {weighted_acc:.4f} | {weighted_f1:.4f} | {weighted_ppv:.4f} | {weighted_dice:.4f}
