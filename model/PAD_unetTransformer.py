@@ -892,10 +892,10 @@ class UNetTransformer(pl.LightningModule):
         ax.set_title('Normalised Confusion Matrix\n(by observed class)\n', fontdict=title_font)
 
         # For Percent CM
-        for i in range(len(LINEAR_ENCODER.keys())):
+        for i in range(len(self.linear_encoder.keys())):
             ax.axhline(i, color="white", lw=2)
 
-        for i in range(len(LINEAR_ENCODER.keys()) - 1):
+        for i in range(len(self.linear_encoder.keys()) - 1):
             ax.add_patch(Rectangle((i + 0.02, i + 0.04), 0.96, 0.92, fill=False, edgecolor='red', lw=4))
 
         plt.savefig(self.testrun_path / f'cm_pct_epoch{self.checkpoint_epoch}.png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0.5)
