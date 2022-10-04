@@ -16,3 +16,5 @@ lightning_logs/*
 *.nc
 *.png
 *.ckpt
+*.xlsx
+*.gz
