@@ -1,4 +1,4 @@
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, freeze_support
 import argparse
 import numpy as np
 import pandas as pd
@@ -10,7 +10,17 @@ from pycocotools.coco import COCO
 from tqdm import tqdm
 
 import time
+from datetime import datetime
 import platform
+
+def starttimer():
+    start = datetime.now()
+    return start
+
+def endtimer(start):
+    end = datetime.now()
+    durn = end - start
+    return end, durn
 
 RANDOM_SEED = 16
 IMG_SIZE = 366
@@ -33,9 +43,9 @@ def extract_metrics(
         freq: str = '1MS',
         save_path: Union[str, Path] = 'data/oad'
 ) -> bool:
-
     if verbose:
-        print(f'Working : {file}')
+        st = starttimer()
+        print(f'Working : {file} | {st.strftime("%Y-%m-%d %H:%M:%S")}')
 
     file = Path(file)
     save_path = Path(save_path)
@@ -132,7 +142,9 @@ def extract_metrics(
     )
 
     if verbose:
-        print(f'Finished: {str(file)}')
+        et, durn = endtimer(st)
+        print(f'Finished: {str(file)} | Duration: {durn.total_seconds()}s')
+
 
     return True
 
@@ -140,9 +152,9 @@ def extract_metrics(
 def main():
 
     # Fork is faster and more memory efficient for our task, default for UNIX, but making sure
-    assert platform.system().lower() == 'linux', f'This system is using fork() as a method for multiprocessing,' \
-                                                 f'fork is only available in UNIX systems. You are running on: ' \
-                                                 f'"{platform.system()}.'
+    #assert platform.system().lower() == 'linux', f'This system is using fork() as a method for multiprocessing,' \
+    #                                             f'fork is only available in UNIX systems. You are running on: ' \
+    #                                             f'"{platform.system()}.'
 
     # Parse cli argumnets
     args = parse_args()
@@ -175,6 +187,7 @@ def main():
         print('Exception:', exc)
 
     if args.num_processes > 1:
+        freeze_support()
         # Run in parallel
         pool = Pool(processes=args.num_processes, maxtasksperchild=1)
 
