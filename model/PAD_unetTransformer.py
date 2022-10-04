@@ -15,7 +15,7 @@ import pickle
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.nn import MultiheadAttention
+#from torch.nn import MultiheadAttention
 from torch.optim import lr_scheduler
 import torch.optim as optim
 import pytorch_lightning as pl
