@@ -3,9 +3,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 def notification(subject:str, messagebody: str):
-    sender_email = "steven.tuften@gmail.com"
-    receiver_email = "steven.tuften@gmail.com"
-    password = "xxwjfhpkvjqylduu"
+    # Substitute your own email address and password here
+    sender_email = "?????????@gmail.com"
+    receiver_email = "?????????@gmail.com"
+    password = "??????????????????????"
     #password = input("Type your password and press enter:")
 
     message = MIMEMultipart("alternative")
