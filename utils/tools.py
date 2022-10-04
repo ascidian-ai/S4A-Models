@@ -210,3 +210,10 @@ def NVDI(B04, B08):
     # https://en.wikipedia.org/wiki/Normalized_difference_vegetation_index
     # NVDI = (NIR - R) / (NIR + R)
     return (B08 - B04) / (B08 + B04)
+
+def kNVDI(B04, B08, sigma = 1.0):
+    # [1] G.Camps - Valls et al., ‘A unified vegetation index for quantifying the terrestrial biosphere’,
+    #     Papers in Natural Resources, Jan.2021, [Online].Available: https://digitalcommons.unl.edu/natrespapers/1313
+    # B08 = NIR, B04 = RED
+    knr = np.exp(-(B08 - B04) ** 2 / (2 * sigma ** 2))
+    return (1 - knr) / (1 + knr)
